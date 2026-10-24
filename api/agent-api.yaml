@@ -1,0 +1,377 @@
+openapi: 3.0.3
+info:
+  title: Chain Agent – API agenta na VM
+  version: 1.0.0
+  description: |
+    Agent běží na každé VM, spravuje procesy aplikací a jejich řetězce.
+    Klientem je centrální backend (nebo GUI přes backend).
+
+    Pravidla:
+    - prefix /agent/v1, JSON v UTF-8, časy v UTC (ISO 8601)
+    - `Authorization: Bearer <token>`; role `read` smí GET, role `control` vše
+    - dlouhé akce (start, stop, vytvoření řetězce) vrací 202 + Operation,
+      průběh se sleduje přes GET /operations/{id}
+    - chyby jako `application/problem+json` (RFC 9457)
+    - každá změna se zapisuje do audit logu agenta (kdo, kdy, co)
+servers:
+  - url: http://{vm}:9100/agent/v1
+    variables:
+      vm: { default: "10.0.1.11" }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Agent žije
+      security: []
+      responses:
+        "200": { description: OK }
+
+  /info:
+    get:
+      summary: Informace o VM a agentovi
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentInfo" }
+
+  /overview:
+    get:
+      summary: Souhrnný stav VM, všech řetězců a aplikací v jednom dotazu
+      description: Hlavní endpoint pro dashboard – backend ho periodicky čte.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Overview" }
+
+  /catalog:
+    get:
+      summary: Aplikace a verze dostupné na VM
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CatalogEntry" }
+
+  /validate:
+    post:
+      summary: Ověří definici řetězce bez provedení změn
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainSpec" }
+      responses:
+        "200":
+          description: Výsledek validace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+
+  /chains:
+    get:
+      summary: Seznam řetězců s aktuálním stavem
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Chain" }
+    post:
+      summary: Vytvoří řetězec (volitelně ho rovnou spustí)
+      parameters:
+        - { name: start, in: query, schema: { type: boolean, default: false } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainSpec" }
+      responses:
+        "201":
+          description: Vytvořeno (start=false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Chain" }
+        "202":
+          description: Vytvořeno a spouští se (start=true)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /chains/{chainId}:
+    parameters:
+      - { name: chainId, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Detail řetězce
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Chain" }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      summary: Změní definici řetězce (běžící řetězec agent restartuje)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChainSpec" }
+      responses:
+        "202":
+          description: Změna se provádí
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        "422": { $ref: "#/components/responses/Problem" }
+    delete:
+      summary: Zastaví a odstraní řetězec
+      responses:
+        "202":
+          description: Odstraňuje se
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+
+  /chains/{chainId}/{action}:
+    post:
+      summary: Spuštění / zastavení / restart celého řetězce
+      description: |
+        start   – spouští odzadu (výstup → vstup), další aplikaci až po /health/ready předchozí
+        stop    – zastavuje odpředu (vstup → výstup), každou nejdřív přes drain
+        restart – stop + start
+      parameters:
+        - { name: chainId, in: path, required: true, schema: { type: string } }
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [start, stop, restart] }
+      responses:
+        "202":
+          description: Akce přijata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /apps/{instanceId}:
+    get:
+      summary: Detail instance aplikace (poslední status, info, restarty)
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string }, example: "chain-a.app2" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppInstance" }
+
+  /apps/{instanceId}/{action}:
+    post:
+      summary: Ovládání jedné instance
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string } }
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [start, stop, restart, drain, pause, resume, reload] }
+      responses:
+        "202":
+          description: Akce přijata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+
+  /apps/{instanceId}/config:
+    patch:
+      summary: Změna runtime konfigurace instance (agent přepošle aplikaci)
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "202":
+          description: Přeposláno
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+
+  /apps/{instanceId}/logs:
+    get:
+      summary: Posledních N řádků logu (agent zachytává stdout/stderr aplikace)
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string } }
+        - { name: tail, in: query, schema: { type: integer, default: 100, maximum: 5000 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines: { type: array, items: { type: string } }
+
+  /operations/{operationId}:
+    get:
+      summary: Stav asynchronní operace
+      parameters:
+        - { name: operationId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+
+  responses:
+    Problem:
+      description: Chyba
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [title, status]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              detail: { type: string }
+              errors: { type: array, items: { type: string } }
+
+  schemas:
+    InstanceState:
+      type: string
+      description: |
+        Stav pohledem agenta. Hodnoty z AppState aplikace plus stavy, které zná jen agent:
+        stopped (proces neběží), unreachable (proces běží, ale API neodpovídá).
+      enum: [stopped, starting, running, degraded, paused, draining, stopping, error, unreachable]
+
+    ChainState:
+      type: string
+      enum: [stopped, starting, running, degraded, broken, stopping]
+
+    AgentInfo:
+      type: object
+      properties:
+        vmName: { type: string, example: "vm-prod-01" }
+        environment: { type: string, example: "production" }
+        agentVersion: { type: string, example: "1.2.0" }
+        startedAt: { type: string, format: date-time }
+        portRange: { type: array, items: { type: integer }, example: [8500, 8999] }
+
+    Overview:
+      type: object
+      properties:
+        vm: { $ref: "#/components/schemas/AgentInfo" }
+        state: { type: string, enum: [ok, warning, problem] }
+        chains:
+          type: array
+          items: { $ref: "#/components/schemas/Chain" }
+        generatedAt: { type: string, format: date-time }
+
+    CatalogEntry:
+      type: object
+      properties:
+        type: { type: string, example: "App2" }
+        versions: { type: array, items: { type: string }, example: ["2.4.1", "2.4.0"] }
+
+    AppSpec:
+      type: object
+      required: [type, version]
+      properties:
+        type: { type: string, example: "App2" }
+        version: { type: string, example: "2.4.1" }
+        port: { type: integer, nullable: true, description: "Vynecháno = agent přidělí z rozsahu" }
+        config:
+          type: object
+          additionalProperties: true
+          description: Hodnoty předané aplikaci v konfiguračním souboru
+
+    ChainSpec:
+      type: object
+      required: [name, apps]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9-]{1,40}$", description: "Vynecháno = agent vygeneruje" }
+        name: { type: string, example: "Řetězec E" }
+        apps:
+          type: array
+          minItems: 2
+          description: Pořadí = směr toku dat; první je vstup řetězce
+          items: { $ref: "#/components/schemas/AppSpec" }
+        restartPolicy: { type: string, enum: [never, on-failure, always], default: on-failure }
+        autostart: { type: boolean, default: true, description: "Spustit po startu VM/agenta" }
+
+    AppInstance:
+      type: object
+      properties:
+        instanceId: { type: string, example: "chain-a.app2" }
+        type: { type: string }
+        version: { type: string }
+        port: { type: integer }
+        position: { type: integer }
+        state: { $ref: "#/components/schemas/InstanceState" }
+        pid: { type: integer, nullable: true }
+        restarts: { type: integer }
+        lastExitCode: { type: integer, nullable: true }
+        lastStatus: { type: object, description: "Poslední odpověď GET /status aplikace" }
+        lastPolledAt: { type: string, format: date-time, nullable: true }
+
+    Chain:
+      type: object
+      properties:
+        spec: { $ref: "#/components/schemas/ChainSpec" }
+        state: { $ref: "#/components/schemas/ChainState" }
+        desiredRunning: { type: boolean }
+        apps:
+          type: array
+          items: { $ref: "#/components/schemas/AppInstance" }
+
+    ValidationResult:
+      type: object
+      properties:
+        valid: { type: boolean }
+        errors: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        assignedPorts: { type: array, items: { type: integer } }
+
+    Operation:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, example: "chain.start" }
+        target: { type: string, example: "chain-a" }
+        status: { type: string, enum: [running, succeeded, failed] }
+        message: { type: string }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              target: { type: string }
+              status: { type: string, enum: [pending, running, succeeded, failed] }
+              message: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }

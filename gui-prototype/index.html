@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chain Control – prototyp GUI</title>
+<!--
+  Statická verze klikacího prototypu webového GUI (CMU).
+  Jeden soubor bez závislostí kromě fontů – stačí otevřít v prohlížeči.
+  Data jsou ukázková a generovaná v prohlížeči; žádné volání backendu.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0F141B;--surface:#161D27;--surface2:#1C2532;--line:#263142;--line2:#3A4A63;--text:#E6EBF2;--muted:#9AA6B8;--soft:#C5CEDB;--link:#7FB4FF}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:15px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.muted{color:var(--muted)}
+button,select,input{font-family:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default;opacity:.4}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:16px 32px;border-bottom:1px solid var(--line);background:#121923}
+.brand{display:flex;align-items:center;gap:12px;font-weight:600;font-size:17px}
+.tag{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:2px 8px;font-weight:400}
+.hdr-meta{display:flex;gap:16px;font-size:13px;color:var(--muted);align-items:center;flex-wrap:wrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+nav.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:16px 32px 0;font-size:14px;color:var(--muted)}
+.linkbtn{background:none;border:none;padding:6px 0;color:var(--link);font-size:14px}
+main{max-width:1360px;margin:0 auto;padding:16px 32px 48px}
+h1{margin:0;font-size:28px;font-weight:600}
+h2{margin:0 0 14px;font-size:16px;font-weight:600}
+.page-head{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:8px 0 24px}
+.page-head.between{justify-content:space-between;align-items:flex-end}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.pill .dot{width:7px;height:7px}
+.summary{display:flex;flex-wrap:wrap;gap:8px}
+.summary div{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 14px}
+.summary .n{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:500}
+.summary .l{font-size:13px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.tile{text-align:left;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:18px 18px 16px;display:flex;flex-direction:column;gap:14px;min-height:220px}
+.tile:hover{border-color:var(--line2)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%}
+.tile-foot{margin-top:auto;display:flex;justify-content:space-between;font-size:13px;color:var(--muted);width:100%;border-top:1px solid var(--line);padding-top:12px}
+.sq{width:14px;height:14px;border-radius:3px;display:inline-block}
+.stack{display:flex;flex-direction:column;gap:16px}
+.chain-apps{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px}
+.app-node{text-align:left;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px 14px;min-width:190px;flex:1 1 190px;display:flex;flex-direction:column;gap:6px}
+.app-node:hover{border-color:var(--line2)}
+.arrow{display:flex;align-items:center}
+.btn{min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font-size:14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.sm{font-size:13px;padding:0 14px}
+.btn.primary{border-color:#3D7BE0;background:#2F6FDB;color:#fff}
+.btn.green{border-color:#2E7D5E;background:#173A2E;color:#BFF0DC}
+.btn.red{border-color:#8A3A39;background:#3A1D1D;color:#FFD3D2}
+.btn.danger{border-color:#C24A48;background:#B33A38;color:#fff}
+.btn.outline-red{border-color:#5A2B2B;background:transparent;color:#FFB4B2}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--link);font-weight:400}
+.icon-btn{width:44px;height:44px;padding:0}
+.toast{margin-bottom:16px;background:#14243A;border:1px solid #2D4F7C;color:#CFE2FF;border-radius:8px;padding:12px 16px;font-size:14px}
+.note{margin-bottom:16px;background:var(--surface2);border:1px solid var(--line2);color:var(--soft);border-radius:8px;padding:12px 16px;font-size:14px}
+.confirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding:12px 16px;background:#2A1717;border:1px solid #8A3A39;border-radius:8px;color:#FFD3D2;font-size:14px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.metrics .card{padding:16px}
+.metrics .v{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:500;margin-top:6px}
+.two-col{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.two-col>.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.two-col>aside{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.dep{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.ep{display:grid;grid-template-columns:80px minmax(0,1fr) 60px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #222B39;font-family:'IBM Plex Mono',monospace;font-size:13px;min-width:480px}
+.logs{background:#0B0F15;border:1px solid #222B39;border-radius:8px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.8;overflow-x:auto}
+.logs div{white-space:nowrap}
+.kv{display:flex;justify-content:space-between;gap:8px;font-size:13px;padding-bottom:8px;border-bottom:1px solid #222B39}
+.kv:last-child{border-bottom:none}
+.kv span:last-child{font-family:'IBM Plex Mono',monospace;text-align:right}
+label.lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.field{width:100%;min-height:44px;background:var(--bg);color:var(--text);border:1px solid var(--line2);border-radius:8px;padding:0 12px;font-size:15px}
+.wiz-item{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.num{width:28px;height:28px;border-radius:50%;background:var(--surface2);border:1px solid var(--line2);display:inline-flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:13px}
+.empty{border:1px dashed var(--line2);border-radius:8px;padding:20px;color:var(--muted);font-size:14px;text-align:center}
+.chip{background:var(--bg);border:1px solid var(--line2);border-radius:6px;padding:6px 10px;font-size:13px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.45}
+.check .t{flex:0 0 auto;font-size:11px;font-weight:600;border:1px solid;border-radius:4px;padding:1px 6px;margin-top:1px}
+@media (max-width:600px){header,nav.crumbs,main{padding-left:16px;padding-right:16px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// --- minimální běhové prostředí pro logiku prototypu -------------------------
+var scheduled = false;
+function scheduleRender() { if (!scheduled) { scheduled = true; requestAnimationFrame(function () { scheduled = false; render(); }); } }
+class DCLogic {
+  constructor(props) { this.props = props || {}; this.state = {}; }
+  setState(patch) { this.state = Object.assign({}, this.state, typeof patch === 'function' ? patch(this.state) : patch); scheduleRender(); }
+  forceUpdate() { scheduleRender(); }
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { screen: 'dash', vmId: null, appKey: null, overrides: {}, level: 'INFO', toast: '' };
+  }
+
+  meta(s) {
+    var M = {
+      ok:   { label: 'Běží',        color: '#3FB68B', bg: 'rgba(63,182,139,0.14)', rank: 0 },
+      warn: { label: 'Degradováno', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)', rank: 1 },
+      err:  { label: 'Chyba',       color: '#F0605D', bg: 'rgba(240,96,93,0.14)',  rank: 2 },
+      off:  { label: 'Zastaveno',   color: '#8A94A6', bg: 'rgba(138,148,166,0.16)', rank: 2 },
+      start:{ label: 'Spouští se',  color: '#7FB4FF', bg: 'rgba(127,180,255,0.14)', rank: 1 }
+    };
+    return M[s];
+  }
+
+  rollup(rank, down) {
+    if (down) return { label: 'Nedostupná', color: '#8A94A6', bg: 'rgba(138,148,166,0.16)' };
+    if (rank === 0) return { label: 'V pořádku', color: '#3FB68B', bg: 'rgba(63,182,139,0.14)' };
+    if (rank === 1) return { label: 'Varování', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)' };
+    return { label: 'Problém', color: '#F0605D', bg: 'rgba(240,96,93,0.14)' };
+  }
+
+  baseData() {
+    return [
+      { id: 'vm1', name: 'vm-prod-01', ip: '10.0.1.11', env: 'Produkce', agent: 'v1.2.0', chains: [
+        { id: 'a', name: 'Řetězec A', desc: 'App1 → App2 → App3', e2e: '84 ms', apps: [
+          { n: 'App1', port: 8081, ver: '2.4.1', s: 'ok', lat: 12 },
+          { n: 'App2', port: 8082, ver: '2.4.1', s: 'ok', lat: 31 },
+          { n: 'App3', port: 8083, ver: '1.9.0', s: 'ok', lat: 22 } ] },
+        { id: 'b', name: 'Řetězec B', desc: 'App1 → App4', e2e: '41 ms', apps: [
+          { n: 'App1', port: 8181, ver: '2.4.1', s: 'ok', lat: 11 },
+          { n: 'App4', port: 8184, ver: '0.8.3', s: 'ok', lat: 19 } ] } ] },
+      { id: 'vm2', name: 'vm-prod-02', ip: '10.0.1.12', env: 'Produkce', agent: 'v1.2.0', chains: [
+        { id: 'a', name: 'Řetězec A', desc: 'App1 → App2 → App3', e2e: '312 ms', apps: [
+          { n: 'App1', port: 8081, ver: '2.4.1', s: 'ok', lat: 14 },
+          { n: 'App2', port: 8082, ver: '2.4.1', s: 'warn', lat: 240 },
+          { n: 'App3', port: 8083, ver: '1.9.0', s: 'ok', lat: 25 } ] },
+        { id: 'c', name: 'Řetězec C', desc: 'App5 → App2 → App6', e2e: '96 ms', apps: [
+          { n: 'App5', port: 8285, ver: '3.0.0', s: 'ok', lat: 18 },
+          { n: 'App2', port: 8282, ver: '2.4.1', s: 'ok', lat: 33 },
+          { n: 'App6', port: 8286, ver: '1.1.2', s: 'ok', lat: 27 } ] } ] },
+      { id: 'vm3', name: 'vm-prod-03', ip: '10.0.1.13', env: 'Produkce', agent: 'v1.1.4', chains: [
+        { id: 'a', name: 'Řetězec A', desc: 'App1 → App2 → App3', e2e: '—', apps: [
+          { n: 'App1', port: 8081, ver: '2.4.1', s: 'ok', lat: 13 },
+          { n: 'App2', port: 8082, ver: '2.4.0', s: 'err', lat: 0 },
+          { n: 'App3', port: 8083, ver: '1.9.0', s: 'ok', lat: 21 } ] },
+        { id: 'b', name: 'Řetězec B', desc: 'App1 → App4', e2e: '44 ms', apps: [
+          { n: 'App1', port: 8181, ver: '2.4.1', s: 'ok', lat: 12 },
+          { n: 'App4', port: 8184, ver: '0.8.3', s: 'ok', lat: 20 } ] },
+        { id: 'd', name: 'Řetězec D', desc: 'App7 → App8', e2e: '—', apps: [
+          { n: 'App7', port: 8387, ver: '1.0.0', s: 'off', lat: 0 },
+          { n: 'App8', port: 8388, ver: '1.0.0', s: 'ok', lat: 9 } ] } ] },
+      { id: 'vm4', name: 'vm-test-01', ip: '10.0.2.21', env: 'Test', agent: 'v1.3.0-rc1', chains: [
+        { id: 'a', name: 'Řetězec A', desc: 'App1 → App2 → App3', e2e: '90 ms', apps: [
+          { n: 'App1', port: 8081, ver: '2.5.0-rc1', s: 'ok', lat: 15 },
+          { n: 'App2', port: 8082, ver: '2.5.0-rc1', s: 'ok', lat: 35 },
+          { n: 'App3', port: 8083, ver: '2.0.0-rc1', s: 'ok', lat: 24 } ] } ] },
+      { id: 'vm5', name: 'vm-test-02', ip: '10.0.2.22', env: 'Test', agent: '—', down: true, lastSeen: '14:58:12', chains: [] }
+    ];
+  }
+
+  catalog() {
+    return [
+      { type: 'App1', versions: ['2.4.1', '2.5.0-rc1'] }, { type: 'App2', versions: ['2.4.1', '2.4.0', '2.5.0-rc1'] },
+      { type: 'App3', versions: ['1.9.0', '2.0.0-rc1'] }, { type: 'App4', versions: ['0.8.3'] },
+      { type: 'App5', versions: ['3.0.0'] }, { type: 'App6', versions: ['1.1.2'] },
+      { type: 'App7', versions: ['1.0.0'] }, { type: 'App8', versions: ['1.0.0'] }
+    ];
+  }
+
+  data() {
+    var extra = this.state.extra || {}, removed = this.state.removed || {};
+    return this.baseData().map(function (vm) {
+      var chains = vm.chains.concat(extra[vm.id] || []).filter(function (c) { return !removed[vm.id + '/' + c.id]; });
+      return Object.assign({}, vm, { chains: chains });
+    });
+  }
+
+  allocPorts(vm, n) {
+    var used = {};
+    vm.chains.forEach(function (c) { c.apps.forEach(function (a) { used[a.port] = true; }); });
+    var res = [], p = 8500;
+    while (res.length < n) { if (!used[p]) res.push(p); p++; }
+    return res;
+  }
+
+  setOv(keys, val) {
+    var o = Object.assign({}, this.state.overrides);
+    keys.forEach(function (k) { o[k] = val; });
+    this.setState({ overrides: o });
+  }
+
+  startChain(vmId, chainId, names, label) {
+    var self = this;
+    var keys = names.map(function (n) { return vmId + '/' + chainId + '/' + n; });
+    this.setOv(keys, 'start');
+    this.setState({ toast: label + ': spouštím odzadu (' + names.slice().reverse().join(' → ') + '), čekám na health/ready…' });
+    var order = keys.slice().reverse();
+    order.forEach(function (k, i) {
+      setTimeout(function () {
+        var o = Object.assign({}, self.state.overrides); o[k] = 'ok';
+        var patch = { overrides: o };
+        if (i === order.length - 1) patch.toast = label + ': všechny aplikace běží, health/ready OK.';
+        self.setState(patch);
+      }, 1000 * (i + 1));
+    });
+  }
+
+  stopChain(vmId, chainId, names, label) {
+    this.setOv(names.map(function (n) { return vmId + '/' + chainId + '/' + n; }), 'off');
+    this.setState({ toast: label + ': zastaveno odpředu (' + names.join(' → ') + '), fronty doběhly.' });
+  }
+
+  removeChain(vmId, chainId, label) {
+    var r = Object.assign({}, this.state.removed || {}); r[vmId + '/' + chainId] = true;
+    this.setState({ removed: r, confirm: null, toast: label + ': zastaven a odstraněn (DELETE /agent/v1/chains/' + chainId + ').' });
+  }
+
+  createChain(start) {
+    var s = this.state, w = s.wiz, vmId = s.vmId;
+    var vm = this.data().filter(function (v) { return v.id === vmId; })[0];
+    var ports = this.allocPorts(vm, w.apps.length);
+    var seq = (s.seq || 0) + 1, id = 'n' + seq;
+    var chain = { id: id, name: w.name.trim(), desc: w.apps.map(function (a) { return a.type; }).join(' → '), e2e: '—',
+      apps: w.apps.map(function (a, i) { return { n: a.type, port: ports[i], ver: a.version, s: start ? 'ok' : 'off', lat: 14 + i * 9 }; }) };
+    var extra = Object.assign({}, s.extra || {}); extra[vmId] = (extra[vmId] || []).concat([chain]);
+    this.setState({ extra: extra, seq: seq, screen: 'vm', wiz: null, toast: chain.name + ': uloženo na VM, řetězec není spuštěn.' });
+    if (start) this.startChain(vmId, id, chain.apps.map(function (a) { return a.n; }), chain.name);
+  }
+
+  status(key, base) { return this.state.overrides[key] || base; }
+
+  buildVm(vm) {
+    var self = this;
+    var total = 0, running = 0, worst = 0;
+    var chains = vm.chains.map(function (c) {
+      var statuses = c.apps.map(function (a) { return self.status(vm.id + '/' + c.id + '/' + a.n, a.s); });
+      var cWorst = 0;
+      var apps = c.apps.map(function (a, i) {
+        var key = vm.id + '/' + c.id + '/' + a.n;
+        var st = statuses[i];
+        var m = self.meta(st);
+        total++; if (st === 'ok' || st === 'warn') running++;
+        if (m.rank > cWorst) cWorst = m.rank;
+        var prevSt = i > 0 ? statuses[i - 1] : 'ok';
+        var linkOk = (prevSt === 'ok' || prevSt === 'warn') && (st === 'ok' || st === 'warn');
+        var line = st === 'start' ? 'Čeká na health/ready' : st === 'off' ? 'Proces zastaven' : st === 'err' ? 'Health check selhal (503)' : 'p95 ' + (st === 'warn' ? a.lat : a.lat) + ' ms';
+        return Object.assign({}, a, { key: key, status: st, label: m.label, color: m.color, bg: m.bg,
+          notFirst: i > 0, linkColor: linkOk ? '#5C6B82' : '#F0605D', linkDash: linkOk ? '0' : '4 4', line: line,
+          chainName: c.name, chainId: c.id, idx: i, chain: c, statuses: statuses,
+          open: function () { self.setState({ screen: 'app', vmId: vm.id, appKey: key, toast: '' }); } });
+      });
+      if (cWorst > worst) worst = cWorst;
+      var starting = statuses.some(function (x) { return x === 'start'; });
+      var allOff = statuses.every(function (x) { return x === 'off'; });
+      var cr = starting ? { label: 'Spouští se', color: '#7FB4FF', bg: 'rgba(127,180,255,0.14)' }
+             : allOff ? { label: 'Zastaven', color: '#8A94A6', bg: 'rgba(138,148,166,0.16)' }
+             : cWorst === 0 ? { label: 'Řetězec průchozí', color: '#3FB68B', bg: 'rgba(63,182,139,0.14)' }
+             : cWorst === 1 ? { label: 'Zpomalený', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)' }
+             : { label: 'Přerušený', color: '#F0605D', bg: 'rgba(240,96,93,0.14)' };
+      var ckey = vm.id + '/' + c.id;
+      var allNames = c.apps.map(function (a) { return a.n; });
+      var toStart = c.apps.filter(function (a, i) { return statuses[i] === 'off' || statuses[i] === 'err'; }).map(function (a) { return a.n; });
+      var anyRun = statuses.some(function (x) { return x === 'ok' || x === 'warn'; });
+      return { id: c.id, rawName: c.name, name: c.name + ' — ' + c.desc, short: c.name + ': ' + c.desc, desc: c.desc,
+        e2e: cWorst >= 1 ? '—' : c.e2e, apps: apps, label: cr.label, color: cr.color, bg: cr.bg,
+        isStartable: !starting && toStart.length > 0, isStoppable: !starting && anyRun,
+        confirming: self.state.confirm === ckey,
+        start: function () { self.startChain(vm.id, c.id, toStart, c.name); },
+        stop: function () { self.stopChain(vm.id, c.id, allNames, c.name); },
+        askRemove: function () { self.setState({ confirm: ckey }); },
+        cancelRemove: function () { self.setState({ confirm: null }); },
+        doRemove: function () { self.removeChain(vm.id, c.id, c.name); } };
+    });
+    var r = this.rollup(worst, vm.down);
+    return Object.assign({}, vm, { chains: chains, label: r.label, color: r.color, bg: r.bg, rank: vm.down ? 3 : worst,
+      reachable: !vm.down, unreachable: !!vm.down, chainCount: chains.length, appCount: total, running: running + '/' + total,
+      open: function () { self.setState({ screen: 'vm', vmId: vm.id, toast: '' }); } });
+  }
+
+  buildApp(vm, a) {
+    var st = a.status, off = st === 'off', err = st === 'err';
+    var self = this;
+    var neigh = function (j, dir) {
+      if (j < 0) return { dir: dir, name: 'Vstup řetězce', label: '—', color: '#9AA6B8' };
+      if (j >= a.chain.apps.length) return { dir: dir, name: 'Výstup řetězce', label: '—', color: '#9AA6B8' };
+      var ns = a.statuses[j];
+      var ok = ns === 'ok' || ns === 'warn';
+      return { dir: dir, name: a.chain.apps[j].n + ' :' + a.chain.apps[j].port, label: ok ? 'Dostupná' : 'Nedostupná', color: ok ? '#3FB68B' : '#F0605D' };
+    };
+    var c = function (code) {
+      if (off) return { code: '—', color: '#8A94A6' };
+      return { code: code, color: code >= 500 ? '#F0605D' : '#3FB68B' };
+    };
+    var eps = [
+      ['GET', '/api/v1/health/live', 200], ['GET', '/api/v1/health/ready', err ? 503 : 200],
+      ['GET', '/api/v1/info', 200], ['GET', '/api/v1/status', 200], ['GET', '/api/v1/metrics', 200],
+      ['GET', '/api/v1/config', 200], ['POST', '/api/v1/control/{action}', 202], ['GET', '/api/v1/logs?tail=100', 200]
+    ].map(function (e) { var r = c(e[2]); return { m: e[0], p: e[1], code: r.code, color: r.color }; });
+    var logs = off ? [
+      { t: '14:12:03', lvl: 'INFO ', msg: 'Shutdown requested via agent (user: operator)', color: '#7FB4FF' },
+      { t: '14:12:04', lvl: 'INFO ', msg: 'Draining queue… 0 messages left', color: '#7FB4FF' },
+      { t: '14:12:04', lvl: 'INFO ', msg: 'Process exited with code 0', color: '#7FB4FF' } ]
+      : err ? [
+      { t: '15:30:41', lvl: 'WARN ', msg: 'Downstream ' + (a.chain.apps[a.idx + 1] ? a.chain.apps[a.idx + 1].n : '') + ' timeout after 5000 ms', color: '#E8A33D' },
+      { t: '15:30:52', lvl: 'ERROR', msg: 'DB connection pool exhausted (20/20)', color: '#F0605D' },
+      { t: '15:31:02', lvl: 'ERROR', msg: 'Readiness check failed: database', color: '#F0605D' } ]
+      : st === 'warn' ? [
+      { t: '15:30:12', lvl: 'INFO ', msg: 'Processed batch #48211 (512 items)', color: '#7FB4FF' },
+      { t: '15:30:58', lvl: 'WARN ', msg: 'Queue depth 1 840 > threshold 1 000', color: '#E8A33D' },
+      { t: '15:31:05', lvl: 'WARN ', msg: 'Slow handler: p95 240 ms', color: '#E8A33D' } ]
+      : [
+      { t: '15:30:55', lvl: 'INFO ', msg: 'Processed batch #48230 (512 items)', color: '#7FB4FF' },
+      { t: '15:31:00', lvl: 'INFO ', msg: 'Heartbeat sent to agent', color: '#7FB4FF' },
+      { t: '15:31:05', lvl: 'INFO ', msg: 'Processed batch #48231 (498 items)', color: '#7FB4FF' } ];
+    var m = this.meta(st);
+    return Object.assign({}, a, { label: m.label, color: m.color, bg: m.bg, isOff: off, build: 'a1f3c9e',
+      metrics: [
+        { label: 'Uptime', value: off ? '—' : '3 d 04 h' },
+        { label: 'Latence p95', value: off || err ? '—' : a.lat + ' ms' },
+        { label: 'Požadavky / min', value: off ? '—' : err ? '12' : '1 240' },
+        { label: 'Chybovost', value: off ? '—' : err ? '38 %' : st === 'warn' ? '1,2 %' : '0,1 %' }
+      ],
+      deps: [ neigh(a.idx - 1, 'Upstream'), neigh(a.idx + 1, 'Downstream') ],
+      endpoints: eps, logs: logs,
+      config: [ { k: 'Upstream URL', v: a.idx > 0 ? 'http://localhost:' + a.chain.apps[a.idx - 1].port : '—' },
+                { k: 'Downstream URL', v: a.chain.apps[a.idx + 1] ? 'http://localhost:' + a.chain.apps[a.idx + 1].port : '—' },
+                { k: 'Timeout', v: '5000 ms' }, { k: 'Max. souběh', v: '16' } ],
+      info: [ { k: 'Instance ID', v: vm.name + '/' + a.chainId + '/' + a.n.toLowerCase() },
+              { k: 'Verze', v: a.ver }, { k: 'Qt', v: '6.7.2' }, { k: 'PID', v: off ? '—' : '24118' }, { k: 'API', v: 'v1' } ] });
+  }
+
+  act(action) {
+    var key = this.state.appKey, o = Object.assign({}, this.state.overrides);
+    var name = key.split('/')[2];
+    if (action === 'stop') { o[key] = 'off'; }
+    else { o[key] = 'ok'; }
+    var msg = action === 'stop' ? name + ': požadavek na zastavení přijat (202) – proces ukončen.'
+            : action === 'start' ? name + ': spuštěno přes agenta VM – health/ready OK.'
+            : name + ': restart dokončen – health/ready OK.';
+    this.setState({ overrides: o, toast: msg });
+  }
+
+  renderVals() {
+    var self = this, s = this.state;
+    var vms = this.data().map(function (v) { return self.buildVm(v); });
+    var counts = [0, 0, 0, 0];
+    vms.forEach(function (v) { counts[v.rank]++; });
+    var vm = vms.filter(function (v) { return v.id === s.vmId; })[0] || vms[0];
+    var appRaw = null;
+    vm.chains.forEach(function (c) { c.apps.forEach(function (a) { if (a.key === s.appKey) appRaw = a; }); });
+    var isApp = s.screen === 'app' && !!appRaw;
+    var app = isApp ? this.buildApp(vm, appRaw) : { n: '', chainName: '', metrics: [], deps: [], endpoints: [], logs: [], config: [], info: [] };
+    var st = isApp ? appRaw.status : 'ok';
+    var running = st === 'ok' || st === 'warn' || st === 'start';
+
+    var isWiz = s.screen === 'wiz';
+    var wiz = s.wiz || { name: '', apps: [] };
+    var cat = this.catalog();
+    var usedTypes = {};
+    wiz.apps.forEach(function (a) { usedTypes[a.type] = true; });
+    var setWiz = function (patch) { self.setState({ wiz: Object.assign({}, self.state.wiz || { name: '', apps: [] }, patch) }); };
+    var catalogItems = cat.map(function (c) {
+      var dis = !!usedTypes[c.type];
+      return { type: c.type, latest: c.versions[0], disabled: dis, opacity: dis ? '0.4' : '1',
+        add: function () { var w = self.state.wiz || { name: '', apps: [] }; setWiz({ apps: w.apps.concat([{ type: c.type, version: c.versions[0] }]) }); } };
+    });
+    var previewPorts = isWiz ? this.allocPorts(vm, wiz.apps.length) : [];
+    var n = wiz.apps.length;
+    var wizApps = wiz.apps.map(function (a, i) {
+      var c = cat.filter(function (x) { return x.type === a.type; })[0];
+      var move = function (d) { var arr = self.state.wiz.apps.slice(); var t = arr[i]; arr[i] = arr[i + d]; arr[i + d] = t; setWiz({ apps: arr }); };
+      return { num: i + 1, type: a.type, version: a.version, port: previewPorts[i], notFirst: i > 0,
+        role: n === 1 ? 'Vstup i výstup' : i === 0 ? 'Vstup' : i === n - 1 ? 'Výstup' : 'Mezičlánek',
+        versions: c.versions.map(function (v) { return { v: v }; }),
+        setVersion: function (e) { var arr = self.state.wiz.apps.slice(); arr[i] = Object.assign({}, arr[i], { version: e.target.value }); setWiz({ apps: arr }); },
+        up: function () { move(-1); }, down: function () { move(1); },
+        remove: function () { var arr = self.state.wiz.apps.slice(); arr.splice(i, 1); setWiz({ apps: arr }); },
+        upDisabled: i === 0, downDisabled: i === n - 1, upOpacity: i === 0 ? '0.35' : '1', downOpacity: i === n - 1 ? '0.35' : '1' };
+    });
+    var OK = { tag: 'OK', color: '#3FB68B' }, WARN = { tag: 'Pozor', color: '#E8A33D' }, ERR = { tag: 'Chyba', color: '#F0605D' };
+    var chk = function (k, text) { return { tag: k.tag, color: k.color, text: text }; };
+    var nm = (wiz.name || '').trim();
+    var taken = vm.chains.some(function (c) { return c.rawName.toLowerCase() === nm.toLowerCase(); });
+    var checks = [];
+    checks.push(!nm ? chk(ERR, 'Zadejte název řetězce.') : taken ? chk(ERR, 'Řetězec s tímto názvem už na VM existuje.') : chk(OK, 'Název je na VM volný.'));
+    checks.push(n >= 2 ? chk(OK, 'Řetězec má ' + n + ' aplikace v pořadí ' + wiz.apps.map(function (a) { return a.type; }).join(' → ') + '.') : chk(ERR, 'Řetězec potřebuje alespoň 2 aplikace.'));
+    if (n) {
+      checks.push(chk(OK, 'Volné porty přidělené agentem: ' + previewPorts.join(', ') + '.'));
+      checks.push(chk(OK, 'Všechny vybrané verze jsou v katalogu VM.'));
+      var rc = wiz.apps.filter(function (a) { return a.version.indexOf('rc') >= 0; });
+      if (rc.length && vm.env === 'Produkce') checks.push(chk(WARN, 'RC verze na produkčním stroji: ' + rc.map(function (a) { return a.type + ' ' + a.version; }).join(', ') + '.'));
+    }
+    var cantCreate = checks.some(function (c) { return c.tag === 'Chyba'; });
+
+    return {
+      isWiz: isWiz, wizName: wiz.name, wizEmpty: n === 0, wizApps: wizApps, catalogItems: catalogItems, checks: checks,
+      cantCreate: cantCreate, createOpacity: cantCreate ? '0.4' : '1',
+      setName: function (e) { setWiz({ name: e.target.value }); },
+      openWiz: function () { self.setState({ screen: 'wiz', wiz: { name: '', apps: [] }, toast: '', confirm: null }); },
+      cancelWiz: function () { self.setState({ screen: 'vm', wiz: null }); },
+      createStart: function () { self.createChain(true); },
+      createSave: function () { self.createChain(false); },
+      isDash: s.screen === 'dash', isVm: s.screen === 'vm', isApp: isApp, showVmCrumb: s.screen !== 'dash',
+      vms: vms, vm: vm, app: app,
+      summary: [
+        { n: counts[0], label: 'V pořádku', color: '#3FB68B' }, { n: counts[1], label: 'Varování', color: '#E8A33D' },
+        { n: counts[2], label: 'Problém', color: '#F0605D' }, { n: counts[3], label: 'Nedostupné', color: '#8A94A6' } ],
+      goDash: function () { self.setState({ screen: 'dash', toast: '' }); },
+      goVm: function () { self.setState({ screen: 'vm', toast: '' }); },
+      doStart: function () { self.act('start'); }, doStop: function () { self.act('stop'); }, doRestart: function () { self.act('restart'); },
+      startDisabled: running, stopDisabled: !running, restartDisabled: !running,
+      startOpacity: running ? '0.4' : '1', stopOpacity: running ? '1' : '0.4', restartOpacity: running ? '1' : '0.4',
+      level: s.level, setLevel: function (e) { self.setState({ level: e.target.value, toast: 'Úroveň logování změněna na ' + e.target.value + ' (PUT /api/v1/config).' }); },
+      hasToast: !!s.toast, toast: s.toast
+    };
+  }
+}
+
+// --- vykreslování ------------------------------------------------------------
+var comp = new Component({});
+var H = [];
+function on(fn) { H.push(fn); return H.length - 1; }
+function e(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function pill(o, big) { return '<span class="pill" style="color:' + o.color + ';background:' + o.bg + (big ? ';font-size:13px;padding:4px 12px' : '') + '"><span class="dot" style="background:' + o.color + '"></span>' + e(o.label) + '</span>'; }
+function map(list, f) { return (list || []).map(f).join(''); }
+var ICON = {
+  grid: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7FB4FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+  up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+  down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  x: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  arrowSm: '<svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="#5C6B82" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 7h16M13 2l5 5-5 5"/></svg>'
+};
+function arrow(color, dash) { return '<div class="arrow" aria-hidden="true" style="color:' + color + '"><svg width="40" height="20" viewBox="0 0 40 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="' + dash + '"><path d="M2 10h32"/><path d="M28 4l6 6-6 6"/></svg></div>'; }
+function toast(V) { return V.hasToast ? '<div class="toast" role="status">' + e(V.toast) + '</div>' : ''; }
+
+function viewDash(V) {
+  return '<div class="page-head between"><div><h1>Virtuální stroje</h1><p class="muted" style="margin:6px 0 0">Klikněte na dlaždici pro zobrazení řetězců aplikací na daném stroji.</p></div>' +
+    '<div class="summary">' + map(V.summary, function (s) { return '<div><span class="dot" style="width:10px;height:10px;background:' + s.color + '"></span><span class="n">' + s.n + '</span><span class="l">' + e(s.label) + '</span></div>'; }) + '</div></div>' +
+    '<div class="grid">' + map(V.vms, function (v) {
+      var body = v.reachable
+        ? '<div class="stack" style="gap:8px;width:100%">' + map(v.chains, function (c) {
+            return '<div class="row"><span style="font-size:13px;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + e(c.short) + '</span><span style="display:flex;gap:4px">' +
+              map(c.apps, function (a) { return '<span class="sq" title="' + e(a.n + ': ' + a.label) + '" style="background:' + a.color + '"></span>'; }) + '</span></div>';
+          }) + '</div><div class="tile-foot"><span>' + v.chainCount + ' řetězce · ' + v.appCount + ' aplikací</span><span class="mono">' + e(v.running) + ' běží</span></div>'
+        : '<div style="font-size:14px;color:var(--soft);line-height:1.5">Agent VM neodpovídá. Poslední heartbeat <span class="mono">' + e(v.lastSeen) + '</span>.</div><div class="tile-foot">Stav aplikací neznámý</div>';
+      return '<button class="tile" data-on="' + on(v.open) + '" aria-label="Otevřít ' + e(v.name) + ', stav ' + e(v.label) + '" style="border-top:4px solid ' + v.color + '">' +
+        '<div class="row" style="align-items:flex-start"><div><div class="mono" style="font-size:17px;font-weight:500">' + e(v.name) + '</div><div class="muted" style="font-size:13px;margin-top:4px">' + e(v.ip + ' · ' + v.env) + '</div></div>' + pill(v) + '</div>' + body + '</button>';
+    }) + '</div>';
+}
+
+function viewVm(V) {
+  var vm = V.vm;
+  var head = '<div class="page-head"><h1 class="mono">' + e(vm.name) + '</h1>' + pill(vm, true) +
+    '<span class="muted" style="font-size:14px">' + e(vm.ip + ' · ' + vm.env + ' · agent ' + vm.agent) + '</span>' +
+    (vm.reachable ? '<button class="btn primary" style="margin-left:auto" data-on="' + on(V.openWiz) + '">' + ICON.plus + 'Přidat řetězec</button>' : '') + '</div>';
+  var down = vm.unreachable ? '<div class="card" style="color:var(--soft);line-height:1.6">Agent na tomto stroji neodpovídá od <span class="mono">' + e(vm.lastSeen) + '</span>. Zkontrolujte, zda VM běží a zda je dostupný port agenta. Poslední známý stav řetězců není zobrazen, aby nevznikl dojem aktuálních dat.</div>' : '';
+  var chains = '<div class="stack">' + map(vm.chains, function (c) {
+    return '<section class="card"><div class="row" style="flex-wrap:wrap;margin-bottom:16px"><div><h2 style="margin:0;font-size:18px">' + e(c.name) + '</h2>' +
+      '<div class="muted" style="font-size:13px;margin-top:4px">Průchod řetězcem p95 <span class="mono">' + e(c.e2e) + '</span> · ' + e(c.desc) + '</div></div>' +
+      '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">' + pill(c) +
+      (c.isStartable ? '<button class="btn sm green" data-on="' + on(c.start) + '">Spustit řetězec</button>' : '') +
+      (c.isStoppable ? '<button class="btn sm" data-on="' + on(c.stop) + '">Zastavit řetězec</button>' : '') +
+      '<button class="btn sm outline-red" data-on="' + on(c.askRemove) + '" aria-label="Odstranit ' + e(c.rawName) + '">' + ICON.trash + 'Odstranit</button></div></div>' +
+      (c.confirming ? '<div class="confirm" role="alert"><span>Odstranit ' + e(c.rawName) + '? Agent řetězec zastaví odpředu, nechá doběhnout frontu a smaže jeho definici z VM.</span><span style="display:flex;gap:8px"><button class="btn sm" data-on="' + on(c.cancelRemove) + '">Zrušit</button><button class="btn sm danger" data-on="' + on(c.doRemove) + '">Ano, odstranit</button></span></div>' : '') +
+      '<div class="chain-apps">' + map(c.apps, function (a) {
+        return (a.notFirst ? arrow(a.linkColor, a.linkDash) : '') +
+          '<button class="app-node" data-on="' + on(a.open) + '" aria-label="Ovládání ' + e(a.n) + ', stav ' + e(a.label) + '" style="border-left:4px solid ' + a.color + '">' +
+          '<div class="row"><span style="font-weight:600;font-size:16px">' + e(a.n) + '</span><span style="font-size:12px;font-weight:600;color:' + a.color + '">' + e(a.label) + '</span></div>' +
+          '<div class="mono muted" style="font-size:12px">:' + a.port + ' · v' + e(a.ver) + '</div><div class="muted" style="font-size:12px">' + e(a.line) + '</div></button>';
+      }) + '</div></section>';
+  }) + '</div>';
+  return head + toast(V) + down + chains;
+}
+
+function viewApp(V) {
+  var a = V.app, vm = V.vm;
+  return '<div class="page-head between" style="align-items:center"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px"><h1>' + e(a.n) + '</h1>' + pill(a, true) +
+    '<span class="mono muted" style="font-size:13px">' + e(vm.ip + ':' + a.port + ' · v' + a.ver + ' · build ' + a.build) + '</span></div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+    '<button class="btn green" data-on="' + on(V.doStart) + '"' + (V.startDisabled ? ' disabled' : '') + '>Spustit</button>' +
+    '<button class="btn" data-on="' + on(V.doRestart) + '"' + (V.restartDisabled ? ' disabled' : '') + '>Restartovat</button>' +
+    '<button class="btn red" data-on="' + on(V.doStop) + '"' + (V.stopDisabled ? ' disabled' : '') + '>Zastavit</button></div></div>' +
+    toast(V) +
+    (a.isOff ? '<div class="note">REST API aplikace neběží – ovládání jde přes agenta VM (<span class="mono">POST /agent/v1/apps/…/start</span>).</div>' : '') +
+    '<div class="metrics">' + map(a.metrics, function (m) { return '<div class="card"><div class="muted" style="font-size:13px">' + e(m.label) + '</div><div class="v">' + e(m.value) + '</div></div>'; }) + '</div>' +
+    '<div class="two-col"><div class="main">' +
+    '<section class="card"><h2>Návaznost v řetězci</h2><div class="stack" style="gap:10px">' + map(a.deps, function (d) {
+      return '<div class="dep"><span><span class="muted" style="font-size:13px">' + e(d.dir) + '</span> <span style="font-weight:600;margin-left:6px">' + e(d.name) + '</span></span><span style="font-size:13px;font-weight:600;color:' + d.color + '">' + e(d.label) + '</span></div>';
+    }) + '</div></section>' +
+    '<section class="card"><h2>Povinné endpointy – poslední odpověď</h2><div style="overflow-x:auto">' + map(a.endpoints, function (p) {
+      return '<div class="ep"><span class="muted">' + e(p.m) + '</span><span>' + e(p.p) + '</span><span style="text-align:right;font-weight:500;color:' + p.color + '">' + e(p.code) + '</span></div>';
+    }) + '</div></section>' +
+    '<section class="card"><h2>Poslední logy</h2><div class="logs">' + map(a.logs, function (l) {
+      return '<div><span style="color:#7D8899">' + e(l.t) + '</span> <span style="color:' + l.color + ';font-weight:500">' + e(l.lvl) + '</span> <span style="color:var(--soft)">' + e(l.msg) + '</span></div>';
+    }) + '</div></section></div>' +
+    '<aside><section class="card"><h2>Konfigurace</h2><label class="lbl" for="loglevel">Úroveň logování</label>' +
+    '<select id="loglevel" class="field" style="padding:0 10px;font-size:14px" data-change="' + on(V.setLevel) + '">' +
+    map(['DEBUG', 'INFO', 'WARN', 'ERROR'], function (l) { return '<option' + (l === V.level ? ' selected' : '') + '>' + l + '</option>'; }) + '</select>' +
+    '<div class="stack" style="gap:8px;margin-top:16px">' + map(a.config, function (k) { return '<div class="kv"><span class="muted">' + e(k.k) + '</span><span>' + e(k.v) + '</span></div>'; }) + '</div></section>' +
+    '<section class="card"><h2>Informace</h2><div class="stack" style="gap:8px">' + map(a.info, function (k) { return '<div class="kv"><span class="muted">' + e(k.k) + '</span><span>' + e(k.v) + '</span></div>'; }) + '</div></section></aside></div>';
+}
+
+function viewWiz(V) {
+  return '<div style="margin:8px 0 24px"><h1>Nový řetězec na <span class="mono">' + e(V.vm.name) + '</span></h1><p class="muted" style="margin:6px 0 0">Vyberte aplikace z katalogu VM a seřaďte je v pořadí, v jakém jimi tečou data. Porty a návazné URL doplní agent.</p></div>' +
+    '<div class="two-col"><div class="main">' +
+    '<section class="card"><h2>1. Název</h2><label class="lbl" for="chainname">Název řetězce</label><input id="chainname" class="field" type="text" placeholder="např. Řetězec E" value="' + e(V.wizName) + '" data-input="' + on(V.setName) + '"></section>' +
+    '<section class="card"><h2>2. Aplikace v řetězci</h2>' +
+    (V.wizEmpty ? '<div class="empty">Zatím žádné aplikace. Přidejte je z katalogu níže – první bude vstup řetězce.</div>' : '') +
+    '<div class="stack" style="gap:8px">' + map(V.wizApps, function (a) {
+      return '<div class="wiz-item"><span class="num">' + a.num + '</span><div style="flex:1 1 120px;min-width:0"><div style="font-weight:600">' + e(a.type) + '</div><div class="muted" style="font-size:12px">' + e(a.role) + ' · port <span class="mono">' + a.port + '</span></div></div>' +
+        '<label class="muted" style="display:flex;align-items:center;gap:8px;font-size:13px">Verze <select class="mono" style="min-height:40px;background:var(--surface);color:var(--text);border:1px solid var(--line2);border-radius:8px;padding:0 8px;font-size:13px" data-change="' + on(a.setVersion) + '">' +
+        map(a.versions, function (o) { return '<option' + (o.v === a.version ? ' selected' : '') + '>' + e(o.v) + '</option>'; }) + '</select></label>' +
+        '<span style="display:flex;gap:4px"><button class="btn icon-btn" data-on="' + on(a.up) + '"' + (a.upDisabled ? ' disabled' : '') + ' aria-label="Posunout ' + e(a.type) + ' nahoru">' + ICON.up + '</button>' +
+        '<button class="btn icon-btn" data-on="' + on(a.down) + '"' + (a.downDisabled ? ' disabled' : '') + ' aria-label="Posunout ' + e(a.type) + ' dolů">' + ICON.down + '</button>' +
+        '<button class="btn icon-btn outline-red" data-on="' + on(a.remove) + '" aria-label="Odebrat ' + e(a.type) + '">' + ICON.x + '</button></span></div>';
+    }) + '</div>' +
+    '<h3 style="margin:20px 0 10px;font-size:14px;color:var(--soft)">Katalog aplikací na VM</h3><div style="display:flex;flex-wrap:wrap;gap:8px">' + map(V.catalogItems, function (k) {
+      return '<button class="btn sm" style="font-weight:400" data-on="' + on(k.add) + '"' + (k.disabled ? ' disabled' : '') + ' aria-label="Přidat ' + e(k.type) + '">' + ICON.plus + '<span style="font-weight:600">' + e(k.type) + '</span><span class="mono muted" style="font-size:12px">' + e(k.latest) + '</span></button>';
+    }) + '</div></section></div>' +
+    '<aside><section class="card"><h2>3. Náhled a kontrola</h2>' +
+    (V.wizEmpty ? '<div class="muted" style="font-size:14px;margin-bottom:14px">Náhled se zobrazí po přidání aplikací.</div>' : '') +
+    '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:16px">' + map(V.wizApps, function (a) {
+      return (a.notFirst ? ICON.arrowSm : '') + '<span class="chip"><b>' + e(a.type) + '</b> <span class="mono muted">:' + a.port + '</span></span>';
+    }) + '</div>' +
+    '<div class="stack" style="gap:8px;margin-bottom:18px">' + map(V.checks, function (c) {
+      return '<div class="check"><span class="t" style="color:' + c.color + ';border-color:' + c.color + '">' + e(c.tag) + '</span><span style="color:var(--soft)">' + e(c.text) + '</span></div>';
+    }) + '</div>' +
+    '<div class="stack" style="gap:8px"><button class="btn primary" data-on="' + on(V.createStart) + '"' + (V.cantCreate ? ' disabled' : '') + '>Vytvořit a spustit</button>' +
+    '<button class="btn" data-on="' + on(V.createSave) + '"' + (V.cantCreate ? ' disabled' : '') + '>Uložit bez spuštění</button>' +
+    '<button class="btn ghost" data-on="' + on(V.cancelWiz) + '">Zrušit</button></div>' +
+    '<p class="muted" style="margin:14px 0 0;font-size:12px;line-height:1.5">Agent spouští odzadu (výstup → vstup) a další aplikaci pustí až po <span class="mono">/health/ready</span> předchozí.</p></section></aside></div>';
+}
+
+function render() {
+  H = [];
+  var V = comp.renderVals();
+  var active = document.activeElement && document.activeElement.id;
+  var caret = active === 'chainname' ? document.activeElement.selectionStart : null;
+  var crumbs = '<nav class="crumbs" aria-label="Drobečková navigace"><button class="linkbtn" data-on="' + on(V.goDash) + '">Všechny VM</button>' +
+    (V.showVmCrumb ? '<span aria-hidden="true">/</span><button class="linkbtn mono" data-on="' + on(V.goVm) + '">' + e(V.vm.name) + '</button>' : '') +
+    (V.isApp ? '<span aria-hidden="true">/</span><span style="color:var(--text)">' + e(V.app.chainName + ' → ' + V.app.n) + '</span>' : '') +
+    (V.isWiz ? '<span aria-hidden="true">/</span><span style="color:var(--text)">Nový řetězec</span>' : '') + '</nav>';
+  var body = V.isDash ? viewDash(V) : V.isVm ? viewVm(V) : V.isApp ? viewApp(V) : V.isWiz ? viewWiz(V) : '';
+  document.getElementById('app').innerHTML =
+    '<header><div class="brand">' + ICON.grid + 'Chain Control<span class="tag mono">ukázková data</span></div>' +
+    '<div class="hdr-meta"><span style="display:inline-flex;align-items:center;gap:6px"><span class="dot" style="background:#3FB68B"></span>Živé obnovování · každých 5 s</span><span class="mono">Statický prototyp</span></div></header>' +
+    crumbs + '<main>' + body + '</main>';
+  if (active) {
+    var el = document.getElementById(active);
+    if (el) { el.focus(); if (caret != null && el.setSelectionRange) el.setSelectionRange(caret, caret); }
+  }
+}
+
+var root = document.getElementById('app');
+root.addEventListener('click', function (ev) {
+  var t = ev.target.closest('[data-on]');
+  if (t && !t.disabled) { H[+t.dataset.on](ev); }
+});
+root.addEventListener('change', function (ev) {
+  var t = ev.target.closest('[data-change]');
+  if (t) H[+t.dataset.change](ev);
+});
+root.addEventListener('input', function (ev) {
+  var t = ev.target.closest('[data-input]');
+  if (t) H[+t.dataset.input](ev);
+});
+render();
+</script>
+</body>
+</html>

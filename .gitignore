@@ -1,0 +1,26 @@
+# build výstupy
+build/
+build-*/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+Makefile
+*.pro.user
+CMakeLists.txt.user
+.qmake.stash
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# lokální konfigurace agenta (obsahuje tokeny)
+agent/config/agent.json

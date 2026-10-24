@@ -1,0 +1,42 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate OpenAPI specs
+        run: |
+          pip install openapi-spec-validator
+          openapi-spec-validator api/app-api.yaml
+          openapi-spec-validator api/agent-api.yaml
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          modules: 'qthttpserver qtwebsockets'
+          cache: true
+      - name: Build libchainapp + example
+        run: |
+          cmake -S libchainapp -B build/libchainapp -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/libchainapp --parallel
+      - name: Build chain-agent
+        run: |
+          cmake -S agent -B build/agent -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/agent --parallel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            build/agent/chain-agent
+            build/libchainapp/example-app

@@ -1,0 +1,15 @@
+{
+  "vmName": "vm-prod-01",
+  "environment": "production",
+  "listenAddress": "0.0.0.0",
+  "listenPort": 9100,
+  "readTokens": ["ZMENTE-read-token"],
+  "controlTokens": ["ZMENTE-control-token"],
+  "catalogDir": "/opt/chain-apps",
+  "stateDir": "/var/lib/chain-agent",
+  "logDir": "/var/log/chain-agent",
+  "portRange": [8500, 8999],
+  "pollIntervalMs": 3000,
+  "readyTimeoutMs": 60000,
+  "stopTimeoutMs": 30000
+}

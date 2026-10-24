@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: Chain App – povinné API aplikace
+  version: 1.0.0
+  description: |
+    Povinná část REST API, kterou musí implementovat každá aplikace v řetězci.
+    Klientem tohoto API je výhradně agent na stejné VM – aplikace proto naslouchá
+    jen na 127.0.0.1 (APP_BIND_ADDRESS), port dostane od agenta v APP_PORT.
+
+    Pravidla platná pro všechny endpointy:
+    - prefix /api/v1, JSON v UTF-8, časy v UTC ve formátu ISO 8601
+    - každý požadavek kromě /health/* nese hlavičku `Authorization: Bearer <APP_API_TOKEN>`
+    - chyby vrací `application/problem+json` (RFC 9457)
+    - hlavička `X-Correlation-ID` se přebírá z příchozí zprávy a posílá dál downstream;
+      pokud chybí, aplikace ji vygeneruje (UUID)
+    - logy aplikace píše na stdout/stderr, ukládá a zpřístupňuje je agent
+servers:
+  - url: http://127.0.0.1:{port}/api/v1
+    variables:
+      port: { default: "8500" }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health/live:
+    get:
+      summary: Proces žije (levná kontrola bez závislostí)
+      security: []
+      responses:
+        "200":
+          description: Proces odpovídá
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LiveResponse" }
+
+  /health/ready:
+    get:
+      summary: Aplikace je připravená zpracovávat (kontroluje závislosti)
+      description: Agent podle tohoto endpointu řídí postupné spouštění řetězce.
+      security: []
+      responses:
+        "200":
+          description: Připravena
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadyResponse" }
+        "503":
+          description: Nepřipravena – v `checks` je uvedeno, co selhalo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadyResponse" }
+
+  /info:
+    get:
+      summary: Statická identita instance
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InfoResponse" }
+
+  /status:
+    get:
+      summary: Provozní stav instance
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /metrics:
+    get:
+      summary: Metriky ve formátu Prometheus
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema: { type: string }
+              example: |
+                # TYPE chain_messages_processed_total counter
+                chain_messages_processed_total 48231
+                # TYPE chain_queue_depth gauge
+                chain_queue_depth 12
+
+  /config:
+    get:
+      summary: Efektivní konfigurace (citlivé hodnoty maskované)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigResponse" }
+    patch:
+      summary: Změna runtime konfigurace
+      description: |
+        Měnit lze jen klíče, které jsou v GET /config označené `runtimeEditable: true`.
+        Ostatní (port, upstream, downstream) mění agent při úpravě řetězce restartem.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              example: { logLevel: "DEBUG", timeoutMs: 8000 }
+      responses:
+        "200":
+          description: Změna provedena, vrací efektivní konfiguraci
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /control/{action}:
+    post:
+      summary: Řízení zpracování
+      description: |
+        - `drain` – přestane přijímat nové zprávy, dokončí rozpracované
+        - `stop`  – drain a poté ukončení procesu s návratovým kódem 0
+        - `pause` / `resume` – pozastavení a obnovení zpracování
+        - `reload` – znovu načte konfiguraci ze souboru
+        Spuštění aplikace řeší agent (spuštěním procesu), ne toto API.
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [drain, stop, pause, resume, reload] }
+      responses:
+        "202":
+          description: Akce přijata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControlResponse" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+
+  responses:
+    Problem:
+      description: Chyba
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    AppState:
+      type: string
+      description: Jednotný stavový model – stejný v aplikacích, agentovi i GUI.
+      enum: [starting, running, degraded, paused, draining, stopping, error]
+
+    Check:
+      type: object
+      required: [name, ok]
+      properties:
+        name: { type: string, example: "downstream:App3" }
+        ok: { type: boolean }
+        detail: { type: string, example: "timeout after 5000 ms" }
+
+    LiveResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+
+    ReadyResponse:
+      type: object
+      required: [ready, checks]
+      properties:
+        ready: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/Check" }
+
+    InfoResponse:
+      type: object
+      required: [instanceId, appType, version, apiVersion, chainId, position, startedAt]
+      properties:
+        instanceId: { type: string, example: "vm-prod-02/chain-a/app2" }
+        appType: { type: string, example: "App2" }
+        version: { type: string, example: "2.4.1" }
+        build: { type: string, example: "a1f3c9e" }
+        apiVersion: { type: string, example: "1" }
+        chainId: { type: string, example: "chain-a" }
+        position: { type: integer, example: 1, description: "0 = vstup řetězce" }
+        upstreamUrl: { type: string, nullable: true }
+        downstreamUrl: { type: string, nullable: true }
+        pid: { type: integer }
+        startedAt: { type: string, format: date-time }
+        qtVersion: { type: string, example: "6.7.2" }
+
+    StatusResponse:
+      type: object
+      required: [instanceId, state, since, uptimeSec]
+      properties:
+        instanceId: { type: string }
+        state: { $ref: "#/components/schemas/AppState" }
+        since: { type: string, format: date-time, description: "Od kdy je v aktuálním stavu" }
+        uptimeSec: { type: integer }
+        message: { type: string, example: "Queue depth over threshold" }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/Check" }
+        processed: { type: integer, description: "Počet zpracovaných zpráv od startu" }
+        errors: { type: integer, description: "Počet chyb od startu" }
+        queueDepth: { type: integer }
+        lastProcessedAt: { type: string, format: date-time, nullable: true }
+        extra:
+          type: object
+          additionalProperties: true
+          description: Aplikačně specifické údaje
+
+    ConfigItem:
+      type: object
+      required: [value, runtimeEditable]
+      properties:
+        value: {}
+        runtimeEditable: { type: boolean }
+        secret: { type: boolean, description: "Hodnota je maskovaná" }
+
+    ConfigResponse:
+      type: object
+      additionalProperties: { $ref: "#/components/schemas/ConfigItem" }
+      example:
+        logLevel: { value: "INFO", runtimeEditable: true }
+        timeoutMs: { value: 5000, runtimeEditable: true }
+        downstreamUrl: { value: "http://127.0.0.1:8502", runtimeEditable: false }
+
+    ControlResponse:
+      type: object
+      required: [accepted, action, state]
+      properties:
+        accepted: { type: boolean }
+        action: { type: string }
+        state: { $ref: "#/components/schemas/AppState" }
+
+    Problem:
+      type: object
+      required: [title, status]
+      properties:
+        type: { type: string, format: uri, default: "about:blank" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
