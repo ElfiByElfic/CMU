@@ -24,3 +24,13 @@ ui_*.h
 
 # lokální konfigurace agenta (obsahuje tokeny)
 agent/config/agent.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
