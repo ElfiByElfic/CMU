@@ -8,8 +8,11 @@
   "catalogDir": "/opt/chain-apps",
   "stateDir": "/var/lib/chain-agent",
   "logDir": "/var/log/chain-agent",
+  "envConfigDir": "/etc/chain-agent/env",
+  "secretsDir": "/etc/chain-agent/secrets",
   "portRange": [8500, 8999],
   "pollIntervalMs": 3000,
   "readyTimeoutMs": 60000,
-  "stopTimeoutMs": 30000
+  "stopTimeoutMs": 30000,
+  "restartBackoffMaxS": 60
 }

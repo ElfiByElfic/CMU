@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Chain Agent – API agenta na VM
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Agent běží na každé VM, spravuje procesy aplikací a jejich řetězce.
     Klientem je centrální backend (nebo GUI přes backend).
@@ -13,6 +13,9 @@ info:
       průběh se sleduje přes GET /operations/{id}
     - chyby jako `application/problem+json` (RFC 9457)
     - každá změna se zapisuje do audit logu agenta (kdo, kdy, co)
+    - konfigurace aplikací: GET /apps/{instanceId}/config (INI nebo JSON, ETag),
+      kterou si stahuje i samotná aplikace svým tokenem (APP_API_TOKEN, APP_CONFIG_URL)
+    - živá dokumentace implementace: http://<vm>:9100/docs
 servers:
   - url: http://{vm}:9100/agent/v1
     variables:
@@ -198,21 +201,64 @@ paths:
               schema: { $ref: "#/components/schemas/Operation" }
 
   /apps/{instanceId}/config:
-    patch:
-      summary: Změna runtime konfigurace instance (agent přepošle aplikaci)
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Konfigurace instance (stahuje si ji i aplikace)
+      description: |
+        Složená konfigurace: výchozí z katalogu → prostředí VM → řetězec → runtime sekce `chain`
+        (port, sousedé, ID instance – nastavuje agent).
+        - token instance (`APP_API_TOKEN`) → včetně tajných hodnot (`secret://…` dosazené)
+        - token role `read`/`control` → tajné hodnoty zamaskované jako `***`
+        Podporuje `If-None-Match` → `304`, pokud se konfigurace nezměnila.
+      security: [{ bearerAuth: [] }]
       parameters:
-        - { name: instanceId, in: path, required: true, schema: { type: string } }
+        - name: format
+          in: query
+          description: Výchozí je formát z manifestu aplikace (configFormat)
+          schema: { type: string, enum: [json, ini] }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: Konfigurace
+          headers:
+            ETag: { schema: { type: string }, description: "Verze konfigurace v uvozovkách" }
+            X-Config-Version: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+            text/plain:
+              schema: { type: string }
+              example: |
+                [General]
+                logLevel=INFO
+
+                [chain]
+                port=8501
+                upstreamUrl=http://127.0.0.1:8500
+        "304": { description: Beze změny }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      summary: Změna konfigurace instance (JSON Merge Patch vrstvy řetězce)
+      description: |
+        Změna se uloží do definice řetězce a do souboru konfigurace. Hodnota `null` klíč maže
+        (vrátí se výchozí hodnota z katalogu). Běžící aplikaci agent pošle PATCH /api/v1/config;
+        když změnu za běhu nepřijme, vrací se `restartRequired: true`
+        (stačí reload nebo restart instance).
       requestBody:
         required: true
         content:
-          application/json:
+          application/merge-patch+json:
             schema: { type: object, additionalProperties: true }
+            example: { logLevel: "DEBUG", database: { host: "db2" } }
       responses:
-        "202":
-          description: Přeposláno
+        "200":
+          description: Uloženo
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Operation" }
+              schema: { $ref: "#/components/schemas/ConfigChangeResult" }
+        "422": { $ref: "#/components/responses/Problem" }
 
   /apps/{instanceId}/logs:
     get:
@@ -278,7 +324,7 @@ components:
       properties:
         vmName: { type: string, example: "vm-prod-01" }
         environment: { type: string, example: "production" }
-        agentVersion: { type: string, example: "1.2.0" }
+        agentVersion: { type: string, example: "2.0.0" }
         startedAt: { type: string, format: date-time }
         portRange: { type: array, items: { type: integer }, example: [8500, 8999] }
 
@@ -336,6 +382,10 @@ components:
         pid: { type: integer, nullable: true }
         restarts: { type: integer }
         lastExitCode: { type: integer, nullable: true }
+        ready: { type: boolean }
+        configFormat: { type: string, enum: [json, ini] }
+        configVersion: { type: string, nullable: true }
+        configPending: { type: boolean, description: "Konfigurace změněna od startu – potřeba reload/restart" }
         lastStatus: { type: object, description: "Poslední odpověď GET /status aplikace" }
         lastPolledAt: { type: string, format: date-time, nullable: true }
 
@@ -348,6 +398,14 @@ components:
         apps:
           type: array
           items: { $ref: "#/components/schemas/AppInstance" }
+
+    ConfigChangeResult:
+      type: object
+      properties:
+        applied: { type: boolean, description: "Aplikace změnu přijala za běhu" }
+        restartRequired: { type: boolean }
+        configVersion: { type: string }
+        message: { type: string }
 
     ValidationResult:
       type: object

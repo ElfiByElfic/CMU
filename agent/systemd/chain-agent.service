@@ -7,14 +7,13 @@ Wants=network-online.target
 Type=simple
 User=chainagent
 Group=chainagent
-ExecStart=/usr/local/bin/chain-agent --config /etc/chain-agent/agent.json
+ExecStart=/opt/chain-agent/venv/bin/chain-agent --config /etc/chain-agent/agent.json
 Restart=always
 RestartSec=3
-# Aplikace jsou potomci agenta (QProcess) a patří do jeho cgroup:
-# zastavení nebo restart agenta zastaví i aplikace, agent je po startu
-# znovu spustí podle chains.json (autostart). Pokud mají aplikace přežít
-# restart agenta, použijte variantu se systemd šablonou (README, kap. 6).
+# Aplikace jsou potomci agenta a patří do jeho cgroup: zastavení agenta zastaví
+# i aplikace a agent je po startu znovu spustí podle chains.json (autostart).
 KillMode=control-group
+TimeoutStopSec=45
 StateDirectory=chain-agent
 LogsDirectory=chain-agent
 
