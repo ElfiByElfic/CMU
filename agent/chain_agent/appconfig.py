@@ -24,7 +24,7 @@ import copy
 import hashlib
 import io
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +69,7 @@ def parse_ini(text: str) -> dict[str, Any]:
     return out
 
 
-def build(layers: list[Mapping[str, Any]], runtime: Mapping[str, Any]) -> dict[str, Any]:
+def build(layers: Sequence[Mapping[str, Any]], runtime: Mapping[str, Any]) -> dict[str, Any]:
     cfg: dict[str, Any] = {}
     for layer in layers:
         cfg = deep_merge(cfg, layer)
