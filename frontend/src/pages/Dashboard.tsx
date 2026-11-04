@@ -4,7 +4,7 @@ import type { Chain, ChainKind, Health } from "../api/types";
 import { ChainTile } from "../components/ChainTile";
 import { Empty, ErrorBox, Icon } from "../components/ui";
 import { HEALTH, HEALTH_ORDER, KIND, ago } from "../lib/format";
-import { navigate, useNow, usePoll } from "../lib/hooks";
+import { navigate, updateParams, useNow, usePoll } from "../lib/hooks";
 
 type Sort = "health" | "name" | "location";
 
@@ -20,10 +20,7 @@ export function Dashboard({ params, canCreate }: { params: URLSearchParams; canC
   const q = params.get("q") || "";
   const sort = (params.get("sort") || "health") as Sort;
 
-  const set = (patch: Record<string, string>) => {
-    const next: Record<string, string> = { health, kind, location, env, q, sort: sort === "health" ? "" : sort };
-    navigate("/", { ...next, ...patch });
-  };
+  const set = (patch: Record<string, string>) => updateParams(patch);
 
   const all = chains.data ?? [];
   const counts = useMemo(() => {

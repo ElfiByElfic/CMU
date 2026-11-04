@@ -94,6 +94,14 @@ export function useRoute(): { path: string; params: URLSearchParams } {
   return route;
 }
 
+/** Změní jen uvedené parametry v aktuální adrese (čte aktuální stav URL, ne zachycenou kopii). */
+export function updateParams(patch: Record<string, string | undefined>): void {
+  const raw = window.location.hash.replace(/^#/, "") || "/";
+  const [path, query = ""] = raw.split("?");
+  const params = Object.fromEntries(new URLSearchParams(query));
+  navigate(path || "/", { ...params, ...patch });
+}
+
 export function navigate(path: string, params?: Record<string, string | undefined>): void {
   const q = new URLSearchParams();
   Object.entries(params ?? {}).forEach(([k, v]) => v && q.set(k, v));

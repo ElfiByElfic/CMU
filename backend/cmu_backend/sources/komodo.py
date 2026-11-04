@@ -124,7 +124,7 @@ class KomodoSource(Source):
             self.last_error = str(e)
             return
         services: dict[str, list[dict[str, Any]]] = {}
-        for s, res in zip(stacks, results):
+        for s, res in zip(stacks, results, strict=True):
             if isinstance(res, BaseException):
                 log.warning("Komodo: služby stacku %s: %s", s.get("name"), res)
                 services[s["id"]] = self._services.get(s["id"], [])

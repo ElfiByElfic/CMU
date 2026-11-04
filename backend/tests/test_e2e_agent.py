@@ -11,18 +11,17 @@ import unittest
 from pathlib import Path
 
 AGENT_TESTS = Path(__file__).resolve().parents[2] / "agent" / "tests"
+sys.path.insert(0, str(AGENT_TESTS))
 
 try:
     import uvicorn
+    from chain_agent.api import create_app as create_agent
     from fastapi.testclient import TestClient
-
-    import chain_agent  # noqa: F401
-    sys.path.insert(0, str(AGENT_TESTS))
     from helpers import CONTROL, READ, AgentEnv  # type: ignore[import-not-found]
 
-    from chain_agent.api import create_app as create_agent
     from cmu_backend.api import create_app
     from cmu_backend.settings import Settings
+
     HAVE_AGENT = True
 except ImportError:  # pragma: no cover
     HAVE_AGENT = False

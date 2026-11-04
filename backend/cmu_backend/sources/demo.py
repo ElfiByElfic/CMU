@@ -360,7 +360,7 @@ class DemoSource(Source):
             raise SourceError("neplatný řetězec", status=422, errors=v.errors)
         if req.kind == ChainKind.process:
             local = f"chain-{compose.slugify(req.name)[:20] or 'new'}"
-            apps = [_p(a.type, a.version, port, "stopped") for a, port in zip(req.processApps, v.assignedPorts)]
+            apps = [_p(a.type, a.version, port, "stopped") for a, port in zip(req.processApps, v.assignedPorts, strict=True)]
         else:
             local = compose.stack_name("cmu-", req.name)
             apps = [_c(a.name, a.image, "stopped") for a in req.containerApps]
