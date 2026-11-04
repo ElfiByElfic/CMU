@@ -47,6 +47,68 @@ jobs:
           name: chain-agent-wheel
           path: agent/dist/*.whl
 
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (včetně agenta pro end-to-end test)
+        run: pip install -e '.[dev]' -e ../agent
+      - name: Lint
+        run: ruff check .
+      - name: Type check
+        run: mypy cmu_backend
+      - name: Tests
+        run: pytest -v
+      - name: Build wheel
+        if: matrix.python == '3.12'
+        run: pip wheel --no-deps -w dist .
+      - uses: actions/upload-artifact@v5
+        if: matrix.python == '3.12'
+        with:
+          name: cmu-backend-wheel
+          path: backend/dist/*.whl
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Type check + build
+        working-directory: frontend
+        run: npm run build
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install backend + Playwright
+        run: |
+          pip install ./backend playwright pytest
+          python -m playwright install --with-deps chromium
+      - name: E2E (prohlížeč ↔ backend v demo režimu)
+        run: pytest -v frontend/e2e
+        env:
+          CMU_SCREENSHOTS: ${{ github.workspace }}/screenshots
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: frontend
+          path: |
+            frontend/dist
+            screenshots
+
   libchainapp:
     runs-on: ubuntu-latest
     steps:

@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import __version__
+from . import __version__, metrics
 from .catalog import Catalog
 from .config import AgentConfig
 from .manager import Busy, ChainManager, Invalid, NotFound, UnknownAction
@@ -170,6 +170,13 @@ def create_app(cfg: AgentConfig) -> FastAPI:
             "chains": manager.chains_json(),
             "generatedAt": utcnow().isoformat(),
         }
+
+    @app.get(f"{PREFIX}/metrics", tags=["agent"], dependencies=[read],
+             responses={200: {"content": {"text/plain": {}}}})
+    async def get_metrics() -> Response:
+        """Stav řetězců a instancí pro Prometheus (text exposition format 0.0.4)."""
+        return Response(metrics.render(manager, __version__),
+                        media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.get(f"{PREFIX}/catalog", tags=["agent"], dependencies=[read])
     async def get_catalog() -> list[dict[str, Any]]:

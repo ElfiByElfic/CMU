@@ -53,6 +53,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Overview" }
 
+  /metrics:
+    get:
+      summary: Metriky stavu řetězců a instancí pro Prometheus
+      description: |
+        Text exposition format 0.0.4. Prometheus agenty objevuje přes HTTP service discovery
+        backendu CMU (labely `vm`, `environment` dodá SD). Vyžaduje token role `read`.
+        Metriky: cmu_agent_info, cmu_chain_state{chain,name,state}, cmu_chain_desired_running{chain},
+        cmu_app_state{chain,app,version,state}, cmu_app_ready, cmu_app_restarts_total, cmu_app_config_pending.
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema: { type: string }
+              example: |
+                cmu_chain_state{chain="chain-a",name="Řetězec A",state="running"} 1
+                cmu_app_ready{chain="chain-a",app="App2",version="2.4.1"} 1
+        "401": { $ref: "#/components/responses/Problem" }
+
   /catalog:
     get:
       summary: Aplikace a verze dostupné na VM

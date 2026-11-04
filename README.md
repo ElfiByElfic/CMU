@@ -2,19 +2,42 @@
 
 Správa řetězců aplikací.
 
-Systém pro provoz a ovládání řetězců aplikací (např. App1 → App2 → App3), které běží na desítkách
-až stovkách virtuálních strojů v jedné síti. Každá VM má **agenta**, který řetězce spouští, hlídá,
-ovládá a rozdává aplikacím jejich **konfiguraci**. Každá aplikace poskytuje **povinné REST API**.
-Nad tím stojí centrální backend a webové GUI (dashboard VM → řetězce → ovládání aplikace).
-
-Stav:
+Systém pro provoz a ovládání řetězců aplikací (např. App1 → App2 → App3) na desítkách až stovkách
+strojů v jedné síti. Řetězec může být složený z **procesů** (spravuje je `chain-agent` na VM)
+nebo z **kontejnerů** (docker compose stack v **Komodu**). **Backend** z obou zdrojů skládá jednotný
+pohled, doplňuje výstrahy ze **Zabbixu** a metriky z **Promethea** a nabízí ho přes REST API.
+**Frontend** (React) z něj zobrazuje dlaždice – **jedna dlaždice = jeden řetězec**, s informací,
+kde běží.
 
 | Část | Stav |
 |---|---|
 | Povinné API aplikací (`api/app-api.yaml`) | návrh hotový |
 | `libchainapp` – Qt knihovna s povinným API | implementace, build ověřený v CI |
 | `agent/` – chain-agent (Python, FastAPI) | implementace, end-to-end testy se skutečnými procesy |
-| Centrální backend + GUI | zatím jen klikací prototyp (`gui-prototype/`), plánováno ve Flasku (kap. 10) |
+| `backend/` – centrální backend (Python, FastAPI) | kostra: zdroje agent/Komodo/demo, integrace Zabbix/Prometheus, testy |
+| `frontend/` – webové GUI (React + TypeScript) | kostra: dlaždice řetězců, detail, skládání řetězce, zdroje; E2E testy |
+
+## Architektura
+
+```
+                       ┌──────────────── backend (FastAPI) ────────────────┐
+ prohlížeč ── /api/v1 ─┤ API ◄── pohled v paměti ◄── zdroje      ◄─────────┼── chain-agent na VM 1…N ── procesy
+ (frontend React)      │                          ◄── integrace ◄──────────┼── Komodo (stacky) ── kontejnery
+                       │  Prometheus SD ─► Prometheus ─► metriky ─────────┼── Zabbix (výstrahy hostitelů)
+                       └────────────────────────────────────────────────────┘
+```
+
+- **Frontend a backend jsou oddělené.** Frontend je statická aplikace, která mluví jen s `/api/v1`.
+  Backend umí víc, než GUI zobrazuje – API je k dispozici i pro skripty, CI a další nástroje
+  (dokumentace běžícího backendu: `/docs`, schéma `/openapi.json`).
+- **Sběr dat je oddělený od obsluhy požadavků.** Každý zdroj a integrace má vlastní smyčku
+  a backend drží poslední stav v paměti; požadavek z GUI nikdy nečeká na stovky agentů.
+  Dotazy na agenty běží souběžně (`concurrency`), jeden dotaz `GET /overview` na VM.
+- **Zdroj** = systém, který řetězce provozuje (`agent`, `komodo`, `demo`). **Integrace** = systém,
+  který k řetězcům jen přidává informace (`zabbix`, `prometheus`). Nový zdroj nebo integrace je
+  jedna třída (viz kap. 10, Rozšíření backendu).
+- **Nedostupná lokalita nikdy neukazuje poslední známý stav** – dlaždice je šedá „Nedostupné“
+  se strukturou řetězce, ale bez stavů aplikací, a akce jsou zakázané.
 
 ## Obsah repozitáře
 
@@ -23,21 +46,40 @@ api/
   app-api.yaml          OpenAPI – povinné API každé aplikace
   agent-api.yaml        OpenAPI – API agenta na VM (testy hlídají shodu s implementací)
 agent/                  chain-agent (Python ≥ 3.10, FastAPI)
-  chain_agent/          model, katalog, konfigurace aplikací, instance, správa řetězců, REST API
+  chain_agent/          model, katalog, konfigurace aplikací, instance, správa řetězců, metriky, REST API
   tests/                end-to-end testy + fake_app.py (referenční aplikace s povinným API)
-  config/               ukázková konfigurace agenta
-  systemd/              unit soubor
-libchainapp/            Qt knihovna implementující povinné API aplikace
-  include/chainapp/     veřejné rozhraní (chainapp.h)
-  src/                  implementace
-  example/main.cpp      ukázková aplikace – vzor přizpůsobení
-  chainapp.pri          include pro projekty stavěné qmake
-gui-prototype/
-  index.html            klikací prototyp webového GUI (jeden soubor, otevřít v prohlížeči)
-.github/workflows/      CI: validace OpenAPI, testy agenta, build libchainapp
+  config/, systemd/     ukázková konfigurace agenta a unit soubor
+backend/                CMU backend (Python ≥ 3.10, FastAPI)
+  cmu_backend/
+    model.py            jednotný model (Chain, Location, Alert, Metric, Operation, …)
+    core.py             smyčky obnovy, skládání pohledu, výpočet stavu dlaždic
+    sources/            zdroje: agent.py, komodo.py (+ compose.py), demo.py
+    integrations/       integrace: zabbix.py, prometheus.py
+    api.py              REST API /api/v1, role viewer/operator, servírování frontendu
+  config/               demo.yaml (simulovaná data), cmu.example.yaml (vše popsané)
+  tests/                testy proti simulovaným API + end-to-end se skutečným agentem
+frontend/               webové GUI (React 19 + TypeScript, Vite)
+  src/pages/            Dashboard (dlaždice), ChainDetail, NewChain, Sources
+  e2e/                  testy v prohlížeči (Playwright) proti backendu v demo režimu
+libchainapp/            Qt knihovna implementující povinné API aplikace (+ example/, chainapp.pri)
+.github/workflows/      CI: OpenAPI, agent, backend, frontend (build + E2E), libchainapp
 ```
 
-## Instalace agenta
+## Rychlý start: backend + frontend s ukázkovými daty
+
+```bash
+# backend v demo režimu (simulované VM, Komodo servery, výstrahy, metriky)
+cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -e .
+cmu-backend --config config/demo.yaml          # API na http://localhost:8000/api/v1, dokumentace /docs
+
+# frontend s automatickým obnovováním (v druhém terminálu)
+cd frontend && npm install && npm run dev       # http://localhost:5173, /api se proxuje na :8000
+```
+
+Produkčně: `npm run build` a v konfiguraci backendu `staticDir: …/frontend/dist` – backend pak
+servíruje GUI i API z jedné adresy (nebo dejte `dist/` na libovolný web server a `/api` proxujte).
+
+## Instalace agenta na VM
 
 Požadavky: Python ≥ 3.10 na každé VM.
 
@@ -68,7 +110,7 @@ V `/etc/chain-agent/agent.json` je potřeba nastavit `vmName` a **vlastní token
 | `readyTimeoutMs` / `stopTimeoutMs` | `60000` / `30000` | Limity pro start (ready) a řízené zastavení |
 | `restartBackoffMaxS` | `60` | Strop prodlevy mezi restarty spadlé aplikace |
 
-## Rychlé vyzkoušení na jednom stroji
+## Rychlé vyzkoušení agenta na jednom stroji
 
 Bez Qt, s referenční aplikací `agent/tests/fake_app.py`:
 
@@ -98,17 +140,11 @@ curl -s localhost:9100/agent/v1/overview -H "Authorization: Bearer t"
 curl -s localhost:9100/agent/v1/apps/test.app1/config -H "Authorization: Bearer t"
 ```
 
-## Architektura
-
-```
- prohlížeč ──► backend + GUI (Flask) ◄── DB/Redis ◄── kolektor ──► chain-agent (VM 1) ──► App1 ─► App2 ─► App3
-                                                          │          :9100              127.0.0.1:85xx
-                                                          └──────► chain-agent (VM 2…N)
-```
+## Kapitoly o agentovi a aplikacích
 
 ## 1. Kdo s kým mluví
 
-- **Kolektor/backend → agent**: REST `/agent/v1/*` na portu 9100, Bearer token s rolí `read` nebo `control`.
+- **Backend → agent**: REST `/agent/v1/*` na portu 9100, Bearer token s rolí `read` nebo `control`.
   Celý stav VM vrací jeden dotaz `GET /agent/v1/overview`.
 - **Agent → aplikace**: REST `/api/v1/*` na `127.0.0.1:<port>`. Aplikace naslouchá **jen na localhostu**,
   zvenku dostupná není. Každá instance má vlastní token (`APP_API_TOKEN`), který jí agent předá při startu.
@@ -159,7 +195,8 @@ Referenční implementace v Pythonu (jen standardní knihovna) je `agent/tests/f
 
 | Endpoint | Účel |
 |---|---|
-| `GET /overview` | Celý stav VM, řetězců a instancí jedním dotazem (pro kolektor) |
+| `GET /overview` | Celý stav VM, řetězců a instancí jedním dotazem (čte ho backend) |
+| `GET /metrics` | Stav řetězců a aplikací pro Prometheus (kap. 11) |
 | `GET /catalog` | Dostupné aplikace a verze |
 | `POST /validate` | Kontrola definice řetězce a přidělení portů bez provedení změn |
 | `GET/POST /chains`, `GET/PUT/DELETE /chains/{id}` | Správa řetězců |
@@ -266,7 +303,7 @@ Doporučení pro CI: job po buildu publikuje balík do Package Registry a deploy
 do `/opt/chain-apps/<Type>/<version>/` na cílových VM. Agent katalog jen čte (`GET /catalog` ho přeskenuje),
 takže nasazení nové verze nic nespouští – použije se až při vytvoření nebo úpravě řetězce.
 
-## 9. Vývoj a testy
+## 9. Vývoj a testy agenta
 
 ```bash
 cd agent && pip install -e '.[dev]'
@@ -279,25 +316,122 @@ stahování konfigurace (INI/JSON, ETag, tajné hodnoty), změnu konfigurace za 
 restart po pádu, selhání startu, SIGTERM po timeoutu, perzistenci a autostart po restartu agenta
 a **shodu `api/agent-api.yaml` s implementací**.
 
-## 10. Centrální backend a GUI (plán)
+## 10. Backend
 
-Pro stovky VM je klíčové **oddělit sběr stavu od webu**:
+### Instalace
 
-- **Kolektor** (samostatný proces, `asyncio` + `httpx`) se každých pár sekund zeptá všech agentů na
-  `GET /overview` a uloží výsledek do sdíleného úložiště (Redis / PostgreSQL / SQLite).
-  300 VM × 1 dotaz / 5 s ≈ 60 požadavků za sekundu – malá zátěž.
-- **Web + GUI ve Flasku** čte jen hotová data z úložiště, nikdy se při requestu neptá agentů.
-  Stránky se obnovují přes htmx; akce (start, stop, konfigurace) Flask přeposílá na agenta.
-- Dashboard pro stovky VM: souhrn, filtr podle stavu (nejdřív problémy), seskupení podle prostředí;
-  detail VM až po kliknutí. Agent nedostupný déle než 3 intervaly je šedý *Nedostupná*,
-  nikdy s posledním známým stavem.
+```bash
+python3 -m venv /opt/cmu/venv && /opt/cmu/venv/bin/pip install ./backend
+/opt/cmu/venv/bin/cmu-backend --config /etc/cmu/cmu.yaml
+```
 
-Klikací prototyp GUI je v `gui-prototype/index.html` – jeden soubor bez buildu, stačí otevřít
-v prohlížeči. Data jsou ukázková a chování je simulované v prohlížeči. Obsahuje dashboard VM,
-detail VM s řetězci, průvodce novým řetězcem (odpovídá `POST /validate` a `POST /chains`)
-a ovládání aplikace.
+Všechny volby jsou popsané v `backend/config/cmu.example.yaml`. Tokeny se do souboru nepíšou –
+`${PROMĚNNÁ}` se nahradí proměnnou prostředí. Inventář stovek VM může být v samostatném souboru
+(`inventoryFile`), změny se načtou bez restartu.
 
-## 11. Známá omezení a další kroky
+### API (`/api/v1`, podrobně na `/docs`)
+
+| Endpoint | Účel |
+|---|---|
+| `GET /chains?health=&kind=&location=&environment=&q=` | Dlaždice – řetězce se stavem, lokalitou, výstrahami a metrikami |
+| `GET /chains/{id}` | Detail řetězce (`id` = `<zdroj>:<lokalita>:<řetězec>`) |
+| `POST /chains/{id}/actions/{start\|stop\|restart}`, `DELETE /chains/{id}` | Akce nad řetězcem (operator) |
+| `POST /chains/{id}/apps/{app}/actions/{akce}`, `GET …/logs` | Akce a logy jedné aplikace/kontejneru |
+| `GET /operations/{id}` | Průběh akce krok po kroku (agent, Komodo i lokální operace) |
+| `GET /summary`, `GET /locations`, `GET /components` | Souhrn, lokality (VM, servery), stav zdrojů a integrací |
+| `GET /targets`, `GET /targets/{zdroj}/{lokalita}/catalog` | Kam lze řetězec umístit, katalog aplikací VM |
+| `POST /chains/validate`, `POST /chains` | Kontrola (u kontejnerů s náhledem docker-compose) a vytvoření řetězce |
+| `GET /integrations/prometheus/targets` | HTTP service discovery pro Prometheus |
+
+Role: `viewer` (čtení, service discovery) a `operator` (akce a vytváření). Bez nastavených tokenů
+je API otevřené – jen pro vývoj.
+
+### Stav dlaždice (`health`)
+
+| Stav | Kdy |
+|---|---|
+| Problém | řetězec přerušený, zastavený, i když má běžet, nebo výstraha Zabbixu „vysoká“/„katastrofa“ |
+| Varování | zpomalený, spouští/zastavuje se, změněná konfigurace čeká na restart, výstraha „střední“/„varování“ |
+| Nedostupné | lokalita neodpovídá déle než `staleAfterS` – stav není znám |
+| Zastaveno | zastavený záměrně |
+| V pořádku | vše běží, žádné výstrahy |
+
+### Rozšíření backendu
+
+- **Nový zdroj** (např. Kubernetes, další Komodo): třída odvozená od `sources/base.py:Source`
+  (`refresh`, `chains`, `locations`, volitelně akce a vytváření) + typ v `settings.py` a `sources/__init__.py`.
+- **Nová integrace** (např. Grafana odkazy, ticketing): třída odvozená od `integrations/base.py:Integration`
+  (`refresh` s vlastním intervalem, `apply` doplní data do pohledu) + nastavení a registrace.
+- Frontend nové typy zdrojů zobrazí bez změn – pracuje jen s jednotným modelem.
+
+### Testy
+
+```bash
+cd backend && pip install -e '.[dev]' -e ../agent
+pytest -v
+```
+
+Testy běží proti simulovaným API agenta, Komoda, Zabbixu a Promethea (`tests/fakes.py`) a jeden
+end-to-end test proti skutečnému chain-agentovi se skutečnými procesy (vytvoření, start odzadu, logy,
+zastavení, smazání, výpadek agenta).
+
+## 11. Integrace
+
+### Komodo – řetězce z kontejnerů
+
+- Řetězec = stack v Komodu, jehož jméno začíná `stackPrefix` (výchozí `cmu-`). Backend čte
+  `ListServers`, `ListStacks` a `ListStackServices`; pořadí a jméno řetězce bere z labelů kontejnerů.
+- Akce: `StartStack` / `StopStack` / `RestartStack` (celý řetězec i jednotlivé služby), logy `GetStackLog`,
+  odstranění `DestroyStack` + `DeleteStack`, průběh přes `GetUpdate`.
+- **Skládání řetězce** (GUI „Nový řetězec“ → server v Komodu): zadáte kontejnery v pořadí toku dat
+  (image, port API, proměnné, port na hostiteli) a backend vygeneruje docker-compose:
+  - každá služba dostane stejný spouštěcí kontrakt jako procesy (`CHAIN_*`, `APP_*`), sousedé se
+    adresují jménem služby (`http://app2:8080`),
+  - start odzadu přes `depends_on: {downstream: {condition: service_healthy}}`,
+  - healthcheck volá `/api/v1/health/ready` (image musí mít `curl`, jinak healthcheck vypněte),
+  - labely `cmu.chain.*` pro zpětné načtení pořadí.
+  Pak zavolá `CreateStack` (obsah compose v `file_contents`) a případně `DeployStack`.
+- V Komodu stačí API klíč uživatele s právem číst servery a stacky, vytvářet stacky a spouštět je.
+
+### Zabbix – výstrahy
+
+- JSON-RPC na `api_jsonrpc.php`, autentizace API tokenem v hlavičce `Authorization: Bearer` (Zabbix 6.4+).
+- Za interval jeden `host.get` (mapování lokalita → hostitel, výsledek se cachuje) a jeden `trigger.get`
+  s aktivními problémy (`value=1`, jen monitorované, bez závislých, od `minSeverity`).
+- Výstrahy se zobrazí u lokality i u všech řetězců na ní a zvyšují stav dlaždice (viz tabulka výše).
+  Jméno lokality = technický název hostitele, výjimky v `hostMap`.
+
+### Prometheus – service discovery a metriky
+
+1. Každý agent vystavuje `GET /agent/v1/metrics` (stav řetězců a aplikací, restarty, připravenost).
+   Prometheus seznam agentů bere z backendu – přidání VM do inventáře CMU = automaticky monitorovaná:
+
+   ```yaml
+   scrape_configs:
+     - job_name: cmu-agents
+       authorization: { credentials: <token role read na agentech> }
+       http_sd_configs:
+         - url: http://cmu.example.local:8000/api/v1/integrations/prometheus/targets
+           authorization: { credentials: <token role viewer v CMU> }
+   ```
+
+2. Volitelně backend čte z Promethea instant dotazy (`integrations.prometheus.metrics`) a zobrazuje je
+   na dlaždicích a v detailu. Dotaz musí vracet vektor s labely `vm` a `chain` (lze změnit).
+
+## 12. Frontend
+
+- React 19 + TypeScript, bez dalších knihoven (vlastní hash router a polling), sestavení přes Vite.
+- `npm run dev` – vývoj s proxy na backend (`CMU_BACKEND=http://…` pro jiný backend),
+  `npm run build` – typová kontrola + `dist/`.
+- Typy API jsou v `src/api/types.ts` a odpovídají `backend/cmu_backend/model.py`.
+- Stránky: **Řetězce** (dlaždice, filtry stav/typ/lokalita/prostředí, hledání, řazení – filtry jsou
+  v URL, dají se sdílet), **detail řetězce** (aplikace v pořadí toku, akce, logy, umístění, výstrahy,
+  metriky), **Nový řetězec** (procesy z katalogu VM, nebo kontejnery pro Komodo s náhledem compose),
+  **Zdroje a integrace** (stav zdrojů, integrací a dostupnost lokalit).
+- E2E testy: `npm run build && pytest frontend/e2e` (potřebují nainstalovaný backend a Playwright;
+  test si sám spustí backend v demo režimu).
+
+## 13. Známá omezení a další kroky
 
 - Aplikace jsou potomci agenta: zastavení agenta (systemd `KillMode=control-group`) zastaví i aplikace,
   po startu je agent spustí znovu. Pokud mají restart agenta přežít, lze spouštění v `instance.py`
@@ -308,3 +442,7 @@ a ovládání aplikace.
 - Komunikace backend ↔ agent je HTTP; mimo izolovanou síť přidejte TLS (reverse proxy, nebo
   `uvicorn --ssl-keyfile/--ssl-certfile`).
 - Zdroj pravdy pro konfiguraci (databáze backendu, nebo Git repozitář s review) zatím není rozhodnutý.
+- Backend zatím drží stav jen v paměti a běží v jedné instanci; pro vysokou dostupnost by stav
+  (a lokální operace) musel jít do sdíleného úložiště (Redis/PostgreSQL).
+- Přihlášení do GUI je zatím API token; napojení na firemní přihlášení (OIDC/LDAP) je další krok.
+- `frontend/package-lock.json` zatím není v repozitáři (vznikne při prvním `npm install`) – commitněte ho.

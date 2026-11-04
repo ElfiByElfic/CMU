@@ -1,0 +1,6 @@
+# Demo režim: simulovaná data, bez agentů a Komoda. Pro vývoj frontendu a ukázky.
+listenPort: 8000
+pollIntervalS: 2
+sources:
+  - type: demo
+    id: demo

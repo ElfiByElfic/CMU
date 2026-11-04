@@ -98,6 +98,14 @@ class AgentTest(unittest.TestCase):
             other = c.get(f"{API}/apps/{chain_id}.app2/config", headers={"Authorization": f"Bearer {app1.l.token}"})
             self.assertEqual(other.status_code, 401, "token instance platí jen pro její konfiguraci")
 
+            # --- metriky pro Prometheus
+            m = c.get(f"{API}/metrics")
+            self.assertEqual(m.status_code, 200)
+            self.assertTrue(m.headers["content-type"].startswith("text/plain"))
+            self.assertIn(f'cmu_chain_state{{chain="{chain_id}",name="Řetězec A",state="running"}} 1', m.text)
+            self.assertIn(f'cmu_app_ready{{chain="{chain_id}",app="App2",version="1.0.0"}} 1', m.text)
+            self.assertEqual(c.get(f"{API}/metrics", headers={"Authorization": ""}).status_code, 401)
+
             # --- logy
             lines = c.get(f"{API}/apps/{chain_id}.app2/logs?tail=10").json()["lines"]
             self.assertTrue(any("fake app" in ln for ln in lines), lines)

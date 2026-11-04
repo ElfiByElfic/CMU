@@ -1,0 +1,64 @@
+# CMU backend – ukázková konfigurace. ${PROMĚNNÁ} se nahradí proměnnou prostředí
+# (${PROMĚNNÁ:-výchozí} s výchozí hodnotou), tokeny tak nemusí být v souboru.
+
+listenAddress: 0.0.0.0
+listenPort: 8000
+pollIntervalS: 5          # jak často se backend ptá zdrojů
+# staleAfterS: 15         # po jaké době bez odpovědi je lokalita nedostupná (výchozí 3× pollIntervalS)
+staticDir: /opt/cmu/frontend/dist   # sestavený frontend; bez něj běží jen API
+
+auth:                     # prázdné seznamy = bez přihlášení (jen pro vývoj)
+  viewerTokens: ["${CMU_VIEWER_TOKEN}"]
+  operatorTokens: ["${CMU_OPERATOR_TOKEN}"]
+
+sources:
+  # Řetězce procesů: chain-agent na každé VM
+  - type: agent
+    id: agents
+    port: 9100
+    token: "${AGENT_READ_TOKEN}"        # role read na agentech
+    controlToken: "${AGENT_CONTROL_TOKEN}"  # role control (akce, vytváření)
+    concurrency: 64                     # souběžné dotazy na agenty
+    timeoutS: 5
+    agents:
+      - { name: vm-prod-01, address: 10.0.1.11, environment: production }
+      - { name: vm-prod-02, address: 10.0.1.12, environment: production }
+    # Stovky VM: seznam v samostatném souboru, změny se načtou bez restartu
+    inventoryFile: /etc/cmu/agents.yaml
+
+  # Řetězce kontejnerů: docker compose stacky v Komodu (prefix jména = řetězec CMU)
+  - type: komodo
+    id: komodo
+    url: https://komodo.example.local
+    apiKey: "${KOMODO_API_KEY}"
+    apiSecret: "${KOMODO_API_SECRET}"
+    stackPrefix: "cmu-"
+    environment: production
+
+  # Simulovaná data pro vývoj frontendu (v produkci odstranit)
+  # - type: demo
+
+integrations:
+  zabbix:
+    url: https://zabbix.example.local/api_jsonrpc.php
+    token: "${ZABBIX_API_TOKEN}"        # API token (Zabbix 6.4+), stačí role s právem číst hostitele
+    webUrl: https://zabbix.example.local
+    hostField: host                     # jméno lokality CMU = technický název hostitele
+    hostMap:                            # výjimky: lokalita → hostitel v Zabbixu
+      docker-01: docker01.example.local
+    minSeverity: 2                      # od „Varování“ výš
+    intervalS: 30
+
+  prometheus:
+    # 1) service discovery agentů: GET /api/v1/integrations/prometheus/targets (funguje vždy)
+    agentMetricsPath: /agent/v1/metrics
+    # 2) metriky v dlaždicích (nepovinné): Prometheus, který agenty stahuje
+    url: http://prometheus.example.local:9090
+    intervalS: 30
+    metrics:
+      - id: restarts_1h
+        label: Restarty za hodinu
+        query: sum by (vm, chain) (increase(cmu_app_restarts_total[1h]))
+      - id: not_ready
+        label: Nepřipravené aplikace
+        query: sum by (vm, chain) (1 - cmu_app_ready)
