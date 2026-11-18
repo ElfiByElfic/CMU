@@ -74,3 +74,21 @@ export const ACTION_LABEL: Record<string, string> = {
   reload: "Načíst konfiguraci",
   delete: "Odstranit",
 };
+
+/** Krátká délka trvání: 45 s, 12 min, 3 h, 5 d. */
+export function duration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  if (s < 86400) return `${Math.round(s / 3600)} h`;
+  return `${Math.round(s / 86400)} d`;
+}
+
+/** Datum a čas pro historii: dnes jen čas, jinak i datum. */
+export function when(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date().toDateString() === d.toDateString();
+  return today
+    ? d.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+}

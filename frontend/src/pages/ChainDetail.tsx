@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api/client";
-import type { Chain, ChainApp, Operation } from "../api/types";
+import type { Chain, ChainApp, ChainEvent, Operation } from "../api/types";
 import { Badge, Empty, ErrorBox, HealthPill, Icon, OperationPanel } from "../components/ui";
-import { ACTION_LABEL, CHAIN_STATE, KIND, SEVERITY, ago, appState, num, time } from "../lib/format";
+import { ACTION_LABEL, CHAIN_STATE, KIND, SEVERITY, ago, appState, duration, num, time, when } from "../lib/format";
 import { navigate, useNow, useOperation, usePoll } from "../lib/hooks";
 
 export function ChainDetail({ id, canOperate }: { id: string; canOperate: boolean }) {
@@ -55,7 +55,14 @@ export function ChainDetail({ id, canOperate }: { id: string; canOperate: boolea
             {c.stale ? (
               <>Lokalita neodpovídá – poslední data {ago(c.lastSeen, now)}. Stav aplikací není znám.</>
             ) : (
-              <>{CHAIN_STATE[c.state]} · data {ago(c.lastSeen, now)}</>
+              <>
+                {CHAIN_STATE[c.state]}
+                {c.stateSince && (c.stateSinceExact
+                  ? <> od {when(c.stateSince)} ({duration(now - Date.parse(c.stateSince))})</>
+                  : <> nejméně {duration(now - Date.parse(c.stateSince))} (od začátku sledování)</>)}
+                {" · "}poslední změna {c.lastChangeAt ? ago(c.lastChangeAt, now) : "žádná zaznamenaná"}
+                {" · "}data {ago(c.lastSeen, now)}
+              </>
             )}
           </p>
         </div>
@@ -147,6 +154,8 @@ export function ChainDetail({ id, canOperate }: { id: string; canOperate: boolea
               </ul>
             )}
           </section>
+
+          <History chainId={c.id} lastChangeAt={c.lastChangeAt} />
 
           {c.metrics.length > 0 && (
             <section className="card">
@@ -255,6 +264,43 @@ function AppPanel({ chain, app, canOperate, onAction }: {
           <ErrorBox error={error} />
           <pre className="logs">{lines === null ? "Načítám…" : lines.length ? lines.join("\n") : "Žádné záznamy."}</pre>
         </>
+      )}
+    </section>
+  );
+}
+
+const EVENT_CLS: Record<ChainEvent["kind"], string> = {
+  observed: "s-unknown", state: "s-info", health: "s-warning", version: "s-ok", alert: "s-problem", apps: "s-info",
+};
+const EVENT_LABEL: Record<ChainEvent["kind"], string> = {
+  observed: "Sledování", state: "Stav", health: "Souhrn", version: "Verze", alert: "Výstraha", apps: "Aplikace",
+};
+
+function History({ chainId, lastChangeAt }: { chainId: string; lastChangeAt: string | null }) {
+  const [events, setEvents] = useState<ChainEvent[] | null>(null);
+  const [all, setAll] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  useEffect(() => {
+    api.history(chainId).then(setEvents, setError);
+  }, [chainId, lastChangeAt]); // znovu načíst při nové změně
+  const shown = events ? (all ? events : events.slice(0, 8)) : [];
+  return (
+    <section className="card">
+      <h2>Historie změn</h2>
+      <ErrorBox error={error} />
+      {events === null && !error && <p className="muted small">Načítám…</p>}
+      {events && events.length === 0 && <p className="muted small">Žádné záznamy.</p>}
+      <ol className="history">
+        {shown.map((e, i) => (
+          <li key={`${e.at}-${i}`}>
+            <span className="mono muted small history-time">{when(e.at)}</span>
+            <span className={`sev ${EVENT_CLS[e.kind]}`}>{EVENT_LABEL[e.kind]}</span>
+            <span className="small">{e.text}</span>
+          </li>
+        ))}
+      </ol>
+      {events && events.length > 8 && (
+        <button className="linklike" onClick={() => setAll(!all)}>{all ? "Zobrazit méně" : `Zobrazit vše (${events.length})`}</button>
       )}
     </section>
   );

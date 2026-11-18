@@ -2,11 +2,13 @@ import type {
   CatalogEntry,
   Chain,
   ChainCreate,
+  ChainEvent,
   ChainValidation,
   ComponentStatus,
   Location,
   Me,
   Operation,
+  SavedView,
   Summary,
   Target,
 } from "./types";
@@ -101,4 +103,9 @@ export const api = {
     request<CatalogEntry[]>("GET", `/targets/${enc(sourceId)}/${enc(location)}/catalog`),
   validate: (req: ChainCreate) => request<ChainValidation>("POST", "/chains/validate", req),
   create: (req: ChainCreate) => request<Operation>("POST", "/chains", req),
+  history: (id: string) => request<ChainEvent[]>("GET", `/chains/${enc(id)}/history`),
+  views: () => request<SavedView[]>("GET", "/views"),
+  createView: (name: string, query: string) => request<SavedView>("POST", "/views", { name, query }),
+  updateView: (id: string, name: string, query: string) => request<SavedView>("PUT", `/views/${enc(id)}`, { name, query }),
+  deleteView: (id: string) => request<null>("DELETE", `/views/${enc(id)}`),
 };

@@ -91,7 +91,10 @@ class UiTest(unittest.TestCase):
 
     def pick(self, page: Page, filter_label: str, option: str, search: str | None = None) -> None:
         """Otevře vícenásobný filtr, případně v něm vyhledá a zaškrtne volbu."""
-        page.get_by_role("button", name=re.compile(f"^{filter_label}")).click()
+        button = page.get_by_role("button", name=re.compile(f"^{filter_label}"))
+        if not button.is_visible():
+            page.get_by_role("button", name=re.compile("^Další filtry")).click()
+        button.click()
         pop = page.get_by_role("dialog", name=f"Filtr: {filter_label}")
         if search:
             pop.get_by_role("searchbox").fill(search)
@@ -206,12 +209,98 @@ class UiTest(unittest.TestCase):
         p.get_by_role("button", name="Vše", exact=True).click()
 
         # další podmínky se kombinují A ZÁROVEŇ
-        self.pick(p, "Další", "Rozdílné verze")
+        self.pick(p, "Podmínky", "Rozdílné verze")
         expect(p.locator(".tile")).to_have_count(4)
         self.assertEqual(p.locator(".tile", has_text="Příjem objednávek").count(), 4)
-        self.pick(p, "Další", "Předběžná verze")
+        self.pick(p, "Podmínky", "Předběžná verze")
         expect(p.locator(".tile")).to_have_count(1)
         self.assertEqual(self.tile_hosts(p), ["vm-test-01"])
+
+    def test_saved_views_and_grouping(self) -> None:
+        p = self.page
+        self.login(p)
+        views = p.get_by_role("region", name="Uložené pohledy")
+
+        self.pick(p, "Hostitel", "vm-prod-01")
+        expect(p.locator(".tile")).to_have_count(2)
+        views.get_by_role("button", name="Uložit jako pohled").click()
+        views.get_by_label(re.compile("Název nového pohledu")).fill("Prod 01")
+        views.get_by_role("button", name="Uložit", exact=True).click()
+        chip = views.get_by_role("button", name="Prod 01", exact=True)
+        expect(chip).to_have_attribute("aria-pressed", "true")
+
+        # otevření pohledu z čistého dashboardu, přežije obnovení stránky
+        views.get_by_role("link", name="Všechny řetězce").click()
+        expect(p.locator(".filter-chip")).to_have_count(0)
+        self.assertGreater(p.locator(".tile").count(), 2)
+        p.reload()
+        views.get_by_role("button", name="Prod 01", exact=True).click()
+        expect(p.locator(".tile")).to_have_count(2)
+        self.assertIn("host=vm-prod-01", p.url)
+
+        # úprava filtrů otevřeného pohledu → uložit změny
+        self.pick(p, "Řetězec", "Fakturace", search="fakt")
+        expect(p.locator(".tile")).to_have_count(1)
+        views.get_by_role("button", name="Uložit změny do „Prod 01“").click()
+        expect(views.get_by_role("button", name="Prod 01", exact=True)).to_have_attribute("aria-pressed", "true")
+        views.get_by_role("button", name="Přejmenovat").click()
+        views.get_by_label("Nový název pohledu").fill("Prod 01 – fakturace")
+        views.get_by_role("button", name="Uložit", exact=True).click()
+        renamed = views.get_by_role("button", name="Prod 01 – fakturace")
+        expect(renamed).to_have_attribute("aria-pressed", "true")
+        views.get_by_role("button", name="Smazat").click()
+        p.get_by_role("alertdialog").get_by_role("button", name="Smazat").click()
+        expect(renamed).to_have_count(0)
+
+        # seskupení podle hostitele a řetězce
+        p.get_by_role("button", name="Zrušit filtry").click()
+        p.get_by_role("combobox", name=re.compile("^Seskupit podle")).select_option("host")
+        groups = p.locator("section.group")
+        expect(groups).to_have_count(7)
+        prod01 = p.get_by_role("region", name="Skupina vm-prod-01")
+        expect(prod01.locator(".tile")).to_have_count(2)
+        prod01.get_by_role("button").first.click()
+        expect(prod01.locator(".tile")).to_have_count(0)
+        self.shot("09-grouped-host")
+        p.get_by_role("combobox", name=re.compile("^Seskupit podle")).select_option("chain")
+        orders = p.get_by_role("region", name="Skupina Příjem objednávek")
+        expect(orders).to_contain_text("na 4 hostitelích")
+        expect(orders.locator(".tile")).to_have_count(4)
+        self.assertIn("group=chain", p.url)
+
+    def test_severity_and_changes(self) -> None:
+        p = self.page
+        self.login(p)
+        total = p.locator(".tile").count()
+        self.pick(p, "Výstraha", "Vysoká")
+        expect(p.locator(".tile")).to_have_count(1)
+        expect(p.locator(".tile")).to_contain_text("Export pro partnery")
+        p.get_by_role("button", name="Zrušit filtry").click()
+        self.pick(p, "Výstraha", "Bez výstrahy")
+        expect(p.locator(".tile")).to_have_count(total - 2)
+
+        p.get_by_role("button", name="Zrušit filtry").click()
+        p.get_by_role("button", name=re.compile("^Další filtry")).click()
+        p.get_by_role("combobox", name=re.compile("^Poslední změna")).select_option("1h")
+        names = p.locator(".tile .tile-name").all_inner_texts()
+        for expected in ("Reporting", "Export pro partnery", "Import dat"):
+            self.assertIn(expected, names)
+        for other in ("Notifikace", "Sandbox", "Fakturace"):
+            self.assertNotIn(other, names)
+        p.get_by_role("combobox", name=re.compile("^Poslední změna")).select_option("!30d")
+        expect(p.locator(".tile")).to_have_count(1)
+        expect(p.locator(".tile")).to_contain_text("Sandbox")
+        expect(p.locator(".tile")).to_contain_text("≥ 40 d")
+        p.get_by_role("combobox", name=re.compile("^Poslední změna")).select_option("")
+        p.get_by_role("combobox", name=re.compile("^Stáří dat")).select_option("15m")
+        expect(p.locator(".tile")).to_have_count(1)
+        expect(p.locator(".tile")).to_contain_text("vm-test-02")
+
+        p.goto(URL + "/#/chains/" + "demo%3Avm-prod-03%3Achain-a")
+        history = p.locator("section.card", has_text="Historie změn")
+        expect(history).to_contain_text("App2: 2.4.1 → 2.4.0")
+        expect(p.locator(".page-head")).to_contain_text("poslední změna")
+        self.shot("10-history")
 
     def test_chain_detail_and_actions(self) -> None:
         p = self.page

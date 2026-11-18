@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from datetime import datetime
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from enum import IntEnum
@@ -17,7 +18,7 @@ import httpx
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -25,6 +26,9 @@ from . import __version__
 from .core import Core
 from .integrations import PrometheusIntegration, sd_targets
 from .model import (
+    ChainEvent,
+    SavedView,
+    SavedViewIn,
     CatalogEntry,
     Chain,
     ChainApp,
@@ -39,6 +43,7 @@ from .model import (
     utcnow,
 )
 from .operations import LocalOperations
+from .views import ViewConflict
 from .settings import Settings
 from .sources import AgentSource, SourceError
 
@@ -188,6 +193,10 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
         name: list[str] = Query([], description="Název řetězce (přesná shoda); opakovat pro více"),
         version: list[str] = Query([], description="Verze: `App2@2.4.1`, nebo jen `2.4.1` (libovolná aplikace)"),
         environment: list[str] = Query([]),
+        severity: list[str] = Query([], description="Závažnost výstrahy: disaster,high,average,warning,info; none"),
+        changed_since: datetime | None = Query(None, alias="changedSince", description="Změna od (ISO čas)"),
+        unchanged_since: datetime | None = Query(None, alias="unchangedSince",
+                                                 description="Beze změny od (ISO čas)"),
         q: str | None = Query(None, description="Hledání v názvu, hostiteli, aplikacích, image a výstrahách"),
     ) -> list[Chain]:
         """Mezi různými parametry platí A ZÁROVEŇ, mezi hodnotami jednoho parametru NEBO."""
@@ -206,6 +215,19 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
             chains = [c for c in chains if c.name in name]
         if environment:
             chains = [c for c in chains if c.location.environment in environment]
+        if severity:
+            sev = {x for v in severity for x in v.split(",") if x}
+            chains = [c for c in chains if ({a.severity.value for a in c.alerts} or {"none"}) & sev]
+        if changed_since is not None:
+            since = changed_since
+            chains = [c for c in chains if c.lastChangeAt is not None and c.lastChangeAt >= since]
+        if unchanged_since is not None:
+            until = unchanged_since
+
+            def unchanged(c: Chain) -> bool:
+                ref = c.lastChangeAt or c.observedSince
+                return ref is not None and ref <= until
+            chains = [c for c in chains if unchanged(c)]
         if version:
             def has_version(c: Chain) -> bool:
                 for a in c.apps:
@@ -253,6 +275,42 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
         ch = get_chain(chain_id)
         need(ch, "logs")
         return {"lines": await source_of(ch).app_logs(ch, app_id, tail)}
+
+    @app.get(f"{P}/chains/{{chain_id}}/history", tags=["chains"], dependencies=[viewer])
+    async def chain_history(chain_id: str) -> list[ChainEvent]:
+        """Historie změn řetězce (nejnovější první): stav, verze, výstrahy."""
+        events = core.history.events(chain_id)
+        if events is None:
+            raise ApiError(404, "Řetězec nenalezen", chain_id)
+        return events
+
+    # ------------------------------------------------------------------ uložené pohledy
+    @app.get(f"{P}/views", tags=["views"], dependencies=[viewer])
+    async def list_views() -> list[SavedView]:
+        return core.views.list()
+
+    @app.post(f"{P}/views", tags=["views"], status_code=201, dependencies=[operator])
+    async def create_view(data: SavedViewIn) -> SavedView:
+        try:
+            return core.views.create(data)
+        except ViewConflict as e:
+            raise ApiError(409, "Pohled nelze uložit", str(e)) from e
+
+    @app.put(f"{P}/views/{{view_id}}", tags=["views"], dependencies=[operator])
+    async def update_view(view_id: str, data: SavedViewIn) -> SavedView:
+        try:
+            v = core.views.update(view_id, data)
+        except ViewConflict as e:
+            raise ApiError(409, "Pohled nelze uložit", str(e)) from e
+        if v is None:
+            raise ApiError(404, "Pohled nenalezen", view_id)
+        return v
+
+    @app.delete(f"{P}/views/{{view_id}}", tags=["views"], status_code=204, dependencies=[operator])
+    async def delete_view(view_id: str) -> Response:
+        if not core.views.delete(view_id):
+            raise ApiError(404, "Pohled nenalezen", view_id)
+        return Response(status_code=204)
 
     @app.get(f"{P}/operations/{{op_id}}", tags=["chains"], dependencies=[viewer])
     async def operation(op_id: str) -> Operation:

@@ -119,6 +119,13 @@ class Chain(BaseModel):
     capabilities: list[str] = Field(default_factory=list, description="Akce, které zdroj umí")
     busyOperation: str | None = None
     localId: str = Field(description="ID řetězce ve zdroji")
+    stateSince: datetime | None = Field(
+        default=None, description="Od kdy je řetězec v aktuálním stavu (state i health)")
+    stateSinceExact: bool = Field(
+        default=False, description="False = změnu stavu jsme neviděli; stav trvá nejméně od stateSince")
+    lastChangeAt: datetime | None = Field(
+        default=None, description="Poslední změna (stav, verze, výstrahy); null = žádná od observedSince")
+    observedSince: datetime | None = Field(default=None, description="Od kdy CMU řetězec sleduje")
 
 
 class Location(BaseModel):
@@ -224,3 +231,28 @@ class Summary(BaseModel):
     locations: int
     unreachableLocations: int
     generatedAt: datetime
+
+
+class ChainEvent(BaseModel):
+    """Záznam v historii řetězce."""
+
+    at: datetime
+    kind: Literal["observed", "state", "health", "version", "alert", "apps"]
+    text: str
+    before: str | None = None
+    after: str | None = None
+
+
+class SavedView(BaseModel):
+    """Uložený pohled dashboardu (kombinace filtrů, řazení a seskupení) – sdílený pro celý tým."""
+
+    id: str
+    name: str = Field(min_length=1, max_length=60)
+    query: str = Field(max_length=2000, description="Parametry dashboardu, např. host=vm-1&health=problem")
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class SavedViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    query: str = Field(default="", max_length=2000)

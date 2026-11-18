@@ -134,6 +134,10 @@ class Settings(BaseModel):
     auth: AuthSettings = AuthSettings()
     sources: list[SourceSettings] = []
     integrations: IntegrationsSettings = IntegrationsSettings()
+    dataDir: Path | None = Field(
+        default=None, description="Adresář pro uložené pohledy a historii změn; bez něj jen v paměti")
+    historyEventsPerChain: int = Field(default=100, ge=1, le=10000)
+    historyRetentionDays: int = Field(default=30, ge=1, description="Jak dlouho držet historii zmizelých řetězců")
     staticDir: Path | None = Field(default=None, description="Sestavený frontend (frontend/dist) pro /")
     corsOrigins: list[str] = []
 

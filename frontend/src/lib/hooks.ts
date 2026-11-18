@@ -113,6 +113,13 @@ export function updateParams(patch: Record<string, ParamValue>): void {
   navigate(path || "/", { ...params, ...patch });
 }
 
+/** Přejde na cestu s hotovým řetězcem parametrů (např. z uloženého pohledu). */
+export function navigateQuery(path: string, query: string): void {
+  const params: Record<string, string[]> = {};
+  new URLSearchParams(query.replace(/^\?/, "")).forEach((v, k) => (params[k] ??= []).push(v));
+  navigate(path, params);
+}
+
 export function navigate(path: string, params?: Record<string, ParamValue>): void {
   const q = new URLSearchParams();
   Object.entries(params ?? {}).forEach(([k, v]) => {

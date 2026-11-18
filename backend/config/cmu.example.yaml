@@ -6,6 +6,9 @@ listenPort: 8000
 pollIntervalS: 5          # jak často se backend ptá zdrojů
 # staleAfterS: 15         # po jaké době bez odpovědi je lokalita nedostupná (výchozí 3× pollIntervalS)
 staticDir: /opt/cmu/frontend/dist   # sestavený frontend; bez něj běží jen API
+dataDir: /var/lib/cmu               # uložené pohledy a historie změn (bez něj jen v paměti)
+historyEventsPerChain: 100          # kolik posledních událostí držet u každého řetězce
+historyRetentionDays: 30            # historie řetězců, které zmizely, se po této době zapomene
 
 auth:                     # prázdné seznamy = bez přihlášení (jen pro vývoj)
   viewerTokens: ["${CMU_VIEWER_TOKEN}"]

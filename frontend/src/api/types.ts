@@ -67,6 +67,28 @@ export interface Chain {
   metrics: Metric[];
   capabilities: string[];
   busyOperation: string | null;
+  /** Od kdy trvá aktuální stav; když stateSinceExact = false, trvá *nejméně* od této doby. */
+  stateSince: string | null;
+  stateSinceExact: boolean;
+  /** Poslední zaznamenaná změna (stav, verze, výstrahy); null = žádná od observedSince. */
+  lastChangeAt: string | null;
+  observedSince: string | null;
+}
+
+export interface ChainEvent {
+  at: string;
+  kind: "observed" | "state" | "health" | "version" | "alert" | "apps";
+  text: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  query: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Location {

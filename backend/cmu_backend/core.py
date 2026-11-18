@@ -16,11 +16,14 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 from . import health, integrations, sources
+from .history import ChangeTracker
 from .integrations import Integration
 from .model import HEALTH_ORDER, Chain, ComponentStatus, Location, Summary, utcnow
 from .operations import LocalOperations
 from .settings import Settings
 from .sources import Source
+from .store import JsonStore
+from .views import ViewStore
 
 log = logging.getLogger(__name__)
 
@@ -33,22 +36,47 @@ class Core:
         self.sources: list[Source] = sources.build(settings, self.local_ops, transports)
         self.integrations: list[Integration] = integrations.build(settings, transports)
         self._tasks: list[asyncio.Task[None]] = []
+        if settings.dataDir is None:
+            log.warning("dataDir není nastavený – uložené pohledy a historie změn jsou jen v paměti")
+        self.history = ChangeTracker(JsonStore(settings.dataDir, "history.json"),
+                                     settings.historyEventsPerChain, settings.historyRetentionDays)
+        self.views = ViewStore(JsonStore(settings.dataDir, "views.json"))
+        for s in self.sources:
+            for chain_id, (events, since, observed) in s.initial_history().items():
+                self.history.seed(chain_id, events, since, observed)
 
     # ------------------------------------------------------------------ životní cyklus
     async def start(self) -> None:
         # první načtení synchronně, aby API po startu nevracelo prázdný pohled
         await asyncio.gather(*(self._safe(s.refresh, s.id) for s in self.sources))
         await asyncio.gather(*(self._safe(self._integration_refresher(i), i.id) for i in self.integrations))
+        self.observe()
         for s in self.sources:
-            self._tasks.append(asyncio.create_task(self._loop(s.refresh, self.settings.pollIntervalS, s.id)))
+            loop = self._loop(self._source_refresher(s), self.settings.pollIntervalS, s.id)
+            self._tasks.append(asyncio.create_task(loop))
         for i in self.integrations:
             self._tasks.append(asyncio.create_task(self._loop(self._integration_refresher(i), i.interval_s, i.id)))
+        self._tasks.append(asyncio.create_task(self._loop(self._flush, 10, "history")))
+
+    def _source_refresher(self, source: Source) -> Callable[[], Awaitable[None]]:
+        async def run() -> None:
+            await source.refresh()
+            self.observe()
+        return run
 
     def _integration_refresher(self, integration: Integration) -> Callable[[], Awaitable[None]]:
         async def run() -> None:
             chains, locations = self._raw()
             await integration.refresh(chains, locations)
+            self.observe()
         return run
+
+    def observe(self) -> None:
+        """Zaznamená změny proti předchozímu pohledu (volá se po každé obnově)."""
+        self.history.observe(self._compose()[0])
+
+    async def _flush(self) -> None:
+        self.history.flush()
 
     async def stop(self) -> None:
         for t in self._tasks:
@@ -59,6 +87,7 @@ class Core:
         components: list[Source | Integration] = [*self.sources, *self.integrations]
         for c in components:
             await c.close()
+        self.history.flush()
 
     @staticmethod
     async def _safe(fn: Callable[[], Awaitable[None]], name: str) -> None:
@@ -74,6 +103,7 @@ class Core:
 
     async def refresh_now(self) -> None:
         await asyncio.gather(*(self._safe(s.refresh, s.id) for s in self.sources))
+        self.observe()
 
     # ------------------------------------------------------------------ pohled
     def _raw(self) -> tuple[list[Chain], list[Location]]:
@@ -86,6 +116,11 @@ class Core:
         return chains, locations
 
     def view(self) -> tuple[list[Chain], list[Location]]:
+        chains, locations = self._compose()
+        self.history.decorate(chains)
+        return chains, locations
+
+    def _compose(self) -> tuple[list[Chain], list[Location]]:
         chains, locations = self._raw()
         for i in self.integrations:
             try:

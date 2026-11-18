@@ -18,6 +18,7 @@ from ..model import (
     Chain,
     ChainApp,
     ChainCreate,
+    ChainEvent,
     ChainKind,
     ChainState,
     ChainValidation,
@@ -131,6 +132,51 @@ class DemoSource(Source):
                    [_c("echo-in", "registry.local/echo:1.0.0"), _c("echo-out", "registry.local/echo:1.0.0")]),
         ]:
             self._chains[f"{ch.location}:{ch.local_id}"] = ch
+
+    # ------------------------------------------------------------------ historie (ukázková)
+    def initial_history(self) -> dict[str, tuple[list[ChainEvent], datetime | None, datetime | None]]:
+        t0 = self._started
+
+        def ago(**kw: float) -> datetime:
+            return t0 - timedelta(**kw)
+
+        def ev(at: datetime, kind: str, text: str, b: str | None = None, a: str | None = None) -> ChainEvent:
+            return ChainEvent(at=at, kind=kind, text=text, before=b, after=a)  # type: ignore[arg-type]
+
+        observed = ago(days=40)
+        h: dict[str, tuple[list[ChainEvent], datetime | None, datetime | None]] = {
+            "vm-prod-01:chain-a": ([ev(ago(days=12), "version", "App2: 2.4.0 → 2.4.1", "2.4.0", "2.4.1")],
+                                   ago(days=12), observed),
+            "vm-prod-01:chain-b": ([ev(ago(days=12), "state", "Stav: spouští se → běží", "starting", "running")],
+                                   ago(days=12), observed),
+            "vm-prod-02:chain-a": ([ev(ago(minutes=7), "state", "Stav: běží → zpomalený", "running", "degraded"),
+                                    ev(ago(minutes=7), "health", "V pořádku → Varování", "ok", "warning")],
+                                   ago(minutes=7), observed),
+            "vm-prod-02:chain-c": ([ev(ago(minutes=42), "alert",
+                                       "Nová výstraha (average): Disk /var zaplněn na 91 %", None, "average"),
+                                    ev(ago(minutes=42), "health", "V pořádku → Varování", "ok", "warning")],
+                                   ago(minutes=42), observed),
+            "vm-prod-03:chain-a": ([ev(ago(days=3), "version", "App2: 2.4.1 → 2.4.0", "2.4.1", "2.4.0"),
+                                    ev(ago(minutes=18), "state", "Stav: běží → přerušený", "running", "broken"),
+                                    ev(ago(minutes=18), "health", "V pořádku → Problém", "ok", "problem")],
+                                   ago(minutes=18), observed),
+            "vm-prod-03:chain-d": ([ev(ago(days=5), "state", "Stav: běží → zastaven", "running", "stopped"),
+                                    ev(ago(days=5), "health", "V pořádku → Zastaveno", "ok", "stopped")],
+                                   ago(days=5), observed),
+            "vm-test-01:chain-a": ([ev(ago(hours=2), "version", f"{n}: {o} → {v}", o, v) for n, o, v in
+                                    [("App1", "2.4.1", "2.5.0-rc1"), ("App2", "2.4.1", "2.5.0-rc1"),
+                                     ("App3", "1.9.0", "2.0.0-rc1")]], ago(hours=2), observed),
+            "vm-test-02:chain-e": ([ev(ago(minutes=33), "health", "V pořádku → Nedostupné", "ok", "unknown")],
+                                   ago(minutes=33), observed),
+            "docker-01:cmu-notifikace": ([ev(ago(days=9), "apps", "Řetězec vytvořen (3 kontejnery)")],
+                                         ago(days=9), ago(days=9)),
+            "docker-01:cmu-export": ([ev(ago(minutes=42), "alert", "Nová výstraha (high): Kontejner packer: vysoké "
+                                         "využití paměti (96 %)", None, "high"),
+                                      ev(ago(minutes=42), "health", "V pořádku → Problém", "ok", "problem")],
+                                     ago(minutes=42), observed),
+            "docker-02:cmu-sandbox": ([], None, observed),
+        }
+        return {f"{self.id}:{k}": v for k, v in h.items()}
 
     # ------------------------------------------------------------------ pohled
     async def refresh(self) -> None:

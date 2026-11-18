@@ -333,11 +333,13 @@ Všechny volby jsou popsané v `backend/config/cmu.example.yaml`. Tokeny se do s
 
 | Endpoint | Účel |
 |---|---|
-| `GET /chains?health=&host=&name=&version=&kind=&environment=&q=` | Dlaždice – řetězce se stavem, hostitelem, výstrahami a metrikami; parametry lze opakovat |
+| `GET /chains?health=&host=&name=&version=&severity=&changedSince=&unchangedSince=&kind=&environment=&q=` | Dlaždice – řetězce se stavem, hostitelem, výstrahami a metrikami; parametry lze opakovat |
 | `GET /chains/{id}` | Detail řetězce (`id` = `<zdroj>:<lokalita>:<řetězec>`) |
 | `POST /chains/{id}/actions/{start\|stop\|restart}`, `DELETE /chains/{id}` | Akce nad řetězcem (operator) |
 | `POST /chains/{id}/apps/{app}/actions/{akce}`, `GET …/logs` | Akce a logy jedné aplikace/kontejneru |
 | `GET /operations/{id}` | Průběh akce krok po kroku (agent, Komodo i lokální operace) |
+| `GET /chains/{id}/history` | Historie změn řetězce (nejnovější první) |
+| `GET/POST /views`, `PUT/DELETE /views/{id}` | Uložené pohledy dashboardu (zápis role operator) |
 | `GET /summary`, `GET /locations`, `GET /components` | Souhrn, lokality (VM, servery), stav zdrojů a integrací |
 | `GET /targets`, `GET /targets/{zdroj}/{lokalita}/catalog` | Kam lze řetězec umístit, katalog aplikací VM |
 | `POST /chains/validate`, `POST /chains` | Kontrola (u kontejnerů s náhledem docker-compose) a vytvoření řetězce |
@@ -437,11 +439,25 @@ zastavení, smazání, výpadek agenta).
   | Řetězec | název řetězce – stejný řetězec na více hostitelích |
   | Verze | verze aplikace (u kontejnerů tag image), seskupené podle aplikace |
   | Typ, Prostředí | procesy / kontejnery; production, test, … |
-  | Další | má výstrahu, rozdílné verze (stejný řetězec má jinde jinou verzi), předběžná verze, čeká na restart, restartovala se, nedostupný hostitel, probíhá operace – kombinují se A ZÁROVEŇ |
+  | Podmínky | má výstrahu, rozdílné verze (stejný řetězec má jinde jinou verzi), předběžná verze, čeká na restart, restartovala se, nedostupný hostitel, probíhá operace – kombinují se A ZÁROVEŇ |
 
+  | Výstraha | závažnost výstrahy (katastrofa, vysoká, střední, varování, info) nebo *bez výstrahy* |
+  | Poslední změna | změna za 15 min / hodinu / 24 h / 7 dní, nebo *beze změny déle než* 7 / 30 dní |
+  | Stáří dat | jen aktuální, nebo data starší než 1 min / 15 min / 1 h |
+
+  Typ, Prostředí, Podmínky, Poslední změna a Stáří dat jsou pod tlačítkem *Další filtry*.
   Hledání prochází názvy, hostitele, adresy, aplikace, image i texty výstrah. Filtry jsou v URL
   (`#/?host=vm-1&host=vm-2&version=App2@2.4.0`), takže se dají poslat odkazem. Stejné filtry umí
   i API: `GET /api/v1/chains?host=…&name=…&version=…&health=…`.
+- **Uložené pohledy** – pojmenovaná kombinace filtrů, řazení a seskupení, sdílená pro celý tým
+  (ukládá backend do `dataDir/views.json`). Pohled otevřený a pak upravený jde uložit znovu
+  („Uložit změny do …“), přejmenovat a smazat. Ukládat a mazat smí role operator, viewer pohledy používá.
+- **Seskupení** dlaždic podle hostitele, řetězce, prostředí, stavu nebo typu; skupina ukazuje počty
+  podle stavu a jde sbalit. Při řazení „nejdřív problémy“ jsou nahoře skupiny s nejhorším stavem.
+- **Stav od kdy a historie** – dlaždice ukazuje, jak dlouho trvá aktuální stav; detail řetězce
+  má historii změn (stav, souhrnný stav, verze aplikací, výstrahy). Sleduje je backend porovnáním
+  po každé obnově a ukládá do `dataDir/history.json`. Když CMU změnu nevidělo (řetězec už tak byl,
+  když ho začalo sledovat), ukazuje „≥ 3 h“ – stav trvá *nejméně* tak dlouho.
 - E2E testy: `npm run build && pytest frontend/e2e` (potřebují nainstalovaný backend a Playwright;
   test si sám spustí backend v demo režimu).
 
@@ -456,7 +472,8 @@ zastavení, smazání, výpadek agenta).
 - Komunikace backend ↔ agent je HTTP; mimo izolovanou síť přidejte TLS (reverse proxy, nebo
   `uvicorn --ssl-keyfile/--ssl-certfile`).
 - Zdroj pravdy pro konfiguraci (databáze backendu, nebo Git repozitář s review) zatím není rozhodnutý.
-- Backend zatím drží stav jen v paměti a běží v jedné instanci; pro vysokou dostupnost by stav
-  (a lokální operace) musel jít do sdíleného úložiště (Redis/PostgreSQL).
+- Backend běží v jedné instanci; pohledy a historie jsou v JSON souborech v `dataDir`, aktuální stav
+  a lokální operace v paměti. Pro vysokou dostupnost by vše muselo jít do sdílené databáze (PostgreSQL).
+- Uložené pohledy jsou sdílené pro celý tým – osobní pohledy půjdou až s přihlašováním uživatelů.
 - Přihlášení do GUI je zatím API token; napojení na firemní přihlášení (OIDC/LDAP) je další krok.
 - `frontend/package-lock.json` zatím není v repozitáři (vznikne při prvním `npm install`) – commitněte ho.

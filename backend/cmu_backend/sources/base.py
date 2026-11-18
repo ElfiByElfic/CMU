@@ -14,6 +14,7 @@ from ..model import (
     CatalogEntry,
     Chain,
     ChainCreate,
+    ChainEvent,
     ChainValidation,
     ComponentStatus,
     Location,
@@ -73,6 +74,10 @@ class Source(abc.ABC):
 
     async def close(self) -> None:  # noqa: B027 – výchozí implementace nic nedělá
         pass
+
+    def initial_history(self) -> dict[str, tuple[list[ChainEvent], datetime | None, datetime | None]]:
+        """Volitelná počáteční historie: id řetězce → (události, stav od, sledováno od)."""
+        return {}
 
     # ------------------------------------------------------------------ akce
     async def chain_action(self, chain: Chain, action: str) -> Operation:
