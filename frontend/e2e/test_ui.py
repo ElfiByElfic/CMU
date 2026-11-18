@@ -151,8 +151,11 @@ class UiTest(unittest.TestCase):
         p.set_viewport_size({"width": 390, "height": 844})
         p.get_by_role("button", name="Zrušit filtry").click()
         expect(p.locator(".tile").first).to_be_visible()
+        wide = p.evaluate("""() => [...document.querySelectorAll('body *')]
+            .filter(e => e.getBoundingClientRect().right > window.innerWidth + 1 && !e.closest('.table-wrap, pre'))
+            .slice(0, 5).map(e => e.tagName + '.' + e.className + ' → ' + Math.round(e.getBoundingClientRect().right))""")
         overflow = p.evaluate("document.documentElement.scrollWidth > window.innerWidth")
-        self.assertFalse(overflow, "na telefonu nesmí být vodorovný posun")
+        self.assertFalse(overflow, f"na telefonu nesmí být vodorovný posun: {wide}")
         self.shot("02-dashboard-phone", full=False)
 
     def test_filters(self) -> None:

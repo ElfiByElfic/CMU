@@ -325,7 +325,8 @@ td svg { vertical-align: -2px; color: var(--muted); }
   border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); }
 .single-active { border-color: var(--link); background: #121b28; }
 .single-label { font-size: 13px; color: var(--muted); margin: 0 !important; white-space: nowrap; }
-.single select { border: 0; background: transparent; min-height: 42px; width: auto; padding-right: 8px; }
+.single { max-width: 100%; min-width: 0; }
+.single select { border: 0; background: transparent; min-height: 42px; width: auto; min-width: 0; flex: 1 1 auto; padding-right: 8px; }
 .display-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
 .display-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .groups { display: flex; flex-direction: column; gap: 18px; }

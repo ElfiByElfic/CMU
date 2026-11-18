@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from enum import IntEnum
 from typing import Any
 
@@ -26,26 +26,26 @@ from . import __version__
 from .core import Core
 from .integrations import PrometheusIntegration, sd_targets
 from .model import (
-    ChainEvent,
-    SavedView,
-    SavedViewIn,
     CatalogEntry,
     Chain,
     ChainApp,
     ChainCreate,
+    ChainEvent,
     ChainKind,
     ChainValidation,
     ComponentStatus,
     Location,
     Operation,
+    SavedView,
+    SavedViewIn,
     Summary,
     Target,
     utcnow,
 )
 from .operations import LocalOperations
-from .views import ViewConflict
 from .settings import Settings
 from .sources import AgentSource, SourceError
+from .views import ViewConflict
 
 log = logging.getLogger(__name__)
 P = "/api/v1"
