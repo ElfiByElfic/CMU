@@ -27,6 +27,7 @@ from .integrations import PrometheusIntegration, sd_targets
 from .model import (
     CatalogEntry,
     Chain,
+    ChainApp,
     ChainCreate,
     ChainKind,
     ChainValidation,
@@ -43,6 +44,17 @@ from .sources import AgentSource, SourceError
 
 log = logging.getLogger(__name__)
 P = "/api/v1"
+
+
+def app_version(a: ChainApp) -> str:
+    """Verze aplikace: u procesů `version`, u kontejnerů tag image (stejně jako frontend)."""
+    if a.version:
+        return a.version
+    image = a.image or ""
+    if "@" in image:
+        return image.split("@", 1)[1][:19]
+    last = image.rsplit("/", 1)[-1]
+    return last.split(":", 1)[1] if ":" in last else "latest"
 
 
 class Role(IntEnum):
@@ -168,30 +180,46 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
     # ------------------------------------------------------------------ řetězce
     @app.get(f"{P}/chains", tags=["chains"], dependencies=[viewer])
     async def list_chains(
-        health: str | None = Query(None, description="Čárkami oddělené: problem,warning,unknown,stopped,ok"),
-        kind: ChainKind | None = None,
-        source: str | None = None,
-        location: str | None = None,
-        environment: str | None = None,
-        q: str | None = Query(None, description="Hledání v názvu, lokalitě, aplikacích a image"),
+        health: list[str] = Query([], description="Stav dlaždice (opakovat nebo čárkami): problem,warning,…"),
+        kind: list[ChainKind] = Query([]),
+        source: list[str] = Query([]),
+        location: list[str] = Query([], description="Hostitel (VM nebo server); opakovat pro více"),
+        host: list[str] = Query([], description="Totéž co location"),
+        name: list[str] = Query([], description="Název řetězce (přesná shoda); opakovat pro více"),
+        version: list[str] = Query([], description="Verze: `App2@2.4.1`, nebo jen `2.4.1` (libovolná aplikace)"),
+        environment: list[str] = Query([]),
+        q: str | None = Query(None, description="Hledání v názvu, hostiteli, aplikacích, image a výstrahách"),
     ) -> list[Chain]:
+        """Mezi různými parametry platí A ZÁROVEŇ, mezi hodnotami jednoho parametru NEBO."""
         chains, _ = core.view()
-        if health:
-            wanted = set(health.split(","))
-            chains = [c for c in chains if c.health.value in wanted]
+        wanted_health = {h for x in health for h in x.split(",") if h}
+        hosts = set(location) | set(host)
+        if wanted_health:
+            chains = [c for c in chains if c.health.value in wanted_health]
         if kind:
-            chains = [c for c in chains if c.kind == kind]
+            chains = [c for c in chains if c.kind in kind]
         if source:
-            chains = [c for c in chains if c.source.id == source]
-        if location:
-            chains = [c for c in chains if c.location.name == location]
+            chains = [c for c in chains if c.source.id in source]
+        if hosts:
+            chains = [c for c in chains if c.location.name in hosts]
+        if name:
+            chains = [c for c in chains if c.name in name]
         if environment:
-            chains = [c for c in chains if c.location.environment == environment]
+            chains = [c for c in chains if c.location.environment in environment]
+        if version:
+            def has_version(c: Chain) -> bool:
+                for a in c.apps:
+                    v = app_version(a)
+                    if f"{a.name}@{v}" in version or v in version:
+                        return True
+                return False
+            chains = [c for c in chains if has_version(c)]
         if q:
             needle = q.casefold()
             chains = [c for c in chains if needle in " ".join(
-                [c.name, c.localId, c.location.name, c.location.address or ""]
-                + [f"{a.name} {a.image or ''} {a.version or ''}" for a in c.apps]).casefold()]
+                [c.name, c.localId, c.location.name, c.location.address or "", c.location.environment or ""]
+                + [f"{a.name} {a.image or ''} {a.version or ''}" for a in c.apps]
+                + [a.name for a in c.alerts]).casefold()]
         return chains
 
     @app.get(f"{P}/chains/{{chain_id}}", tags=["chains"], dependencies=[viewer])

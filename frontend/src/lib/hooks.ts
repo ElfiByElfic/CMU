@@ -78,6 +78,8 @@ export function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+const ROUTE_EVENT = "cmu:route";
+
 /** Hash router: #/cesta?param=hodnota */
 export function useRoute(): { path: string; params: URLSearchParams } {
   const parse = () => {
@@ -89,24 +91,37 @@ export function useRoute(): { path: string; params: URLSearchParams } {
   useEffect(() => {
     const on = () => setRoute(parse());
     window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
+    window.addEventListener(ROUTE_EVENT, on);
+    return () => {
+      window.removeEventListener("hashchange", on);
+      window.removeEventListener(ROUTE_EVENT, on);
+    };
   }, []);
   return route;
 }
 
-/** Změní jen uvedené parametry v aktuální adrese (čte aktuální stav URL, ne zachycenou kopii). */
-export function updateParams(patch: Record<string, string | undefined>): void {
+export type ParamValue = string | string[] | undefined;
+
+/** Změní jen uvedené parametry v aktuální adrese (čte aktuální stav URL, ne zachycenou kopii).
+ *  Pole = parametr opakovaný pro každou hodnotu (?host=a&host=b), prázdná hodnota parametr odstraní. */
+export function updateParams(patch: Record<string, ParamValue>): void {
   const raw = window.location.hash.replace(/^#/, "") || "/";
   const [path, query = ""] = raw.split("?");
-  const params = Object.fromEntries(new URLSearchParams(query));
+  const current = new URLSearchParams(query);
+  const params: Record<string, ParamValue> = {};
+  current.forEach((_, k) => (params[k] = current.getAll(k)));
   navigate(path || "/", { ...params, ...patch });
 }
 
-export function navigate(path: string, params?: Record<string, string | undefined>): void {
+export function navigate(path: string, params?: Record<string, ParamValue>): void {
   const q = new URLSearchParams();
-  Object.entries(params ?? {}).forEach(([k, v]) => v && q.set(k, v));
+  Object.entries(params ?? {}).forEach(([k, v]) => {
+    (Array.isArray(v) ? v : [v]).forEach((x) => x && q.append(k, x));
+  });
   const qs = q.toString();
   window.location.hash = path + (qs ? `?${qs}` : "");
+  // hashchange přijde až asynchronně; ovládací prvky (zaškrtávátka, pole) musí reagovat hned
+  window.dispatchEvent(new Event(ROUTE_EVENT));
 }
 
 export function useNow(intervalMs = 5000): number {

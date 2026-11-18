@@ -89,6 +89,19 @@ class UiTest(unittest.TestCase):
             Path(SHOTS).mkdir(parents=True, exist_ok=True)
             self.page.screenshot(path=f"{SHOTS}/{name}.png", full_page=full)
 
+    def pick(self, page: Page, filter_label: str, option: str, search: str | None = None) -> None:
+        """Otevře vícenásobný filtr, případně v něm vyhledá a zaškrtne volbu."""
+        page.get_by_role("button", name=re.compile(f"^{filter_label}")).click()
+        pop = page.get_by_role("dialog", name=f"Filtr: {filter_label}")
+        if search:
+            pop.get_by_role("searchbox").fill(search)
+        pop.get_by_role("checkbox", name=re.compile(option)).first.check()
+        page.keyboard.press("Escape")
+        expect(pop).to_be_hidden()
+
+    def tile_hosts(self, page: Page) -> list[str]:
+        return sorted(page.locator(".tile .tile-loc .mono").all_inner_texts())
+
     def login(self, page: Page) -> None:
         page.goto(URL + "/#/")
         page.get_by_label("Token").fill(OPERATOR)
@@ -127,7 +140,7 @@ class UiTest(unittest.TestCase):
         expect(p.locator(".tile")).to_have_count(1)
         expect(p.locator(".tile")).to_contain_text("docker-01")
         p.get_by_role("button", name="Zrušit filtry").click()
-        p.get_by_label("Typ").select_option("container")
+        self.pick(p, "Typ", "Kontejnery")
         expect(p.locator(".tile", has_text="Procesy")).to_have_count(0)
         self.assertGreaterEqual(p.locator(".tile", has_text="Kontejnery").count(), 3)
         self.assertIn("kind=container", p.url)
@@ -138,6 +151,67 @@ class UiTest(unittest.TestCase):
         overflow = p.evaluate("document.documentElement.scrollWidth > window.innerWidth")
         self.assertFalse(overflow, "na telefonu nesmí být vodorovný posun")
         self.shot("02-dashboard-phone", full=False)
+
+    def test_filters(self) -> None:
+        p = self.page
+        self.login(p)
+
+        # hostitel: víc hodnot = NEBO
+        self.pick(p, "Hostitel", "vm-prod-01")
+        expect(p.locator(".tile")).to_have_count(2)
+        self.assertEqual(set(self.tile_hosts(p)), {"vm-prod-01"})
+        self.pick(p, "Hostitel", "vm-prod-02", search="prod-02")
+        expect(p.locator(".tile")).to_have_count(4)
+        self.assertIn("host=vm-prod-01&host=vm-prod-02", p.url)
+
+        # řetězec: různé filtry = A ZÁROVEŇ
+        self.pick(p, "Řetězec", "Příjem objednávek", search="příjem")
+        expect(p.locator(".tile")).to_have_count(2)
+        self.assertEqual(self.tile_hosts(p), ["vm-prod-01", "vm-prod-02"])
+        self.shot("07-filters")
+
+        # odkaz s filtry se dá sdílet: po načtení stejné výsledky a štítky filtrů
+        p.reload()
+        expect(p.locator(".tile")).to_have_count(2)
+        expect(p.locator(".filter-chip")).to_have_count(3)
+        p.get_by_role("button", name="Odebrat filtr Hostitel: vm-prod-02").click()
+        expect(p.locator(".tile")).to_have_count(1)
+
+        # počty v nabídce zohledňují ostatní filtry
+        p.get_by_role("button", name="Zrušit filtry").click()
+        self.pick(p, "Řetězec", "Fakturace", search="fakt")
+        p.get_by_role("button", name=re.compile("^Hostitel")).click()
+        pop = p.get_by_role("dialog", name="Filtr: Hostitel")
+        expect(pop.locator(".ms-opt", has_text="vm-prod-01").locator(".ms-count")).to_have_text("1")
+        expect(pop.locator(".ms-opt", has_text="vm-prod-02").locator(".ms-count")).to_have_text("0")
+        p.keyboard.press("Escape")
+
+        # verze (u kontejnerů tag image)
+        p.get_by_role("button", name="Zrušit filtry").click()
+        self.pick(p, "Verze", "2.4.0", search="2.4.0")
+        expect(p.locator(".tile")).to_have_count(1)
+        self.assertEqual(self.tile_hosts(p), ["vm-prod-03"])
+        p.get_by_role("button", name="Zrušit filtry").click()
+        self.pick(p, "Verze", "2.1.0", search="2.1.0")
+        expect(p.locator(".tile")).to_contain_text("Notifikace")
+
+        # rychlé přepínače stavu
+        p.get_by_role("button", name="Zrušit filtry").click()
+        p.get_by_role("button", name="S problémem").click()
+        pills = p.locator(".tile .tile-head .pill").all_inner_texts()
+        self.assertTrue(pills and all(x in ("Problém", "Varování", "Nedostupné") for x in pills), pills)
+        p.get_by_role("button", name="Bez problému").click()
+        pills = p.locator(".tile .tile-head .pill").all_inner_texts()
+        self.assertTrue(pills and all(x in ("V pořádku", "Zastaveno") for x in pills), pills)
+        p.get_by_role("button", name="Vše", exact=True).click()
+
+        # další podmínky se kombinují A ZÁROVEŇ
+        self.pick(p, "Další", "Rozdílné verze")
+        expect(p.locator(".tile")).to_have_count(4)
+        self.assertEqual(p.locator(".tile", has_text="Příjem objednávek").count(), 4)
+        self.pick(p, "Další", "Předběžná verze")
+        expect(p.locator(".tile")).to_have_count(1)
+        self.assertEqual(self.tile_hosts(p), ["vm-test-01"])
 
     def test_chain_detail_and_actions(self) -> None:
         p = self.page
