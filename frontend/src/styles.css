@@ -347,3 +347,9 @@ td svg { vertical-align: -2px; color: var(--muted); }
   .history li { grid-template-columns: max-content 1fr; }
   .history li .small:last-child { grid-column: 1 / -1; }
 }
+
+/* ---------- přihlášení ---------- */
+.user { color: var(--text); font-weight: 600; margin-right: 6px; }
+.card.narrow { max-width: 560px; margin: 40px auto; display: flex; flex-direction: column; gap: 12px; }
+.card.narrow h1 { font-size: 22px; }
+.card.narrow p { margin: 0; }

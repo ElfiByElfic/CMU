@@ -345,8 +345,8 @@ Všechny volby jsou popsané v `backend/config/cmu.example.yaml`. Tokeny se do s
 | `POST /chains/validate`, `POST /chains` | Kontrola (u kontejnerů s náhledem docker-compose) a vytvoření řetězce |
 | `GET /integrations/prometheus/targets` | HTTP service discovery pro Prometheus |
 
-Role: `viewer` (čtení, service discovery) a `operator` (akce a vytváření). Bez nastavených tokenů
-je API otevřené – jen pro vývoj.
+Role: `viewer` (čtení, service discovery) a `operator` (akce a vytváření). Lidé se přihlašují přes
+Keycloak (viz níže), stroje statickými tokeny. Bez `oidc` a bez tokenů je API otevřené – jen pro vývoj.
 
 ### Stav dlaždice (`health`)
 
@@ -376,6 +376,54 @@ pytest -v
 Testy běží proti simulovaným API agenta, Komoda, Zabbixu a Promethea (`tests/fakes.py`) a jeden
 end-to-end test proti skutečnému chain-agentovi se skutečnými procesy (vytvoření, start odzadu, logy,
 zastavení, smazání, výpadek agenta).
+
+## Přihlášení přes Keycloak (role z LDAPu)
+
+```
+ prohlížeč ──(1) přesměrování──► Keycloak ──► LDAP (ověření hesla, skupiny)
+     │◄──(2) kód ◄──────────────────┘
+     │──(3) kód + PKCE → token (JWT se skupinami)
+     └──(4) /api/v1 + Bearer token ──► backend: ověří podpis (JWKS), iss, exp, klienta → role
+```
+
+- Frontend je veřejný klient (OpenID Connect, Authorization Code + PKCE S256, žádné tajemství).
+  Adresy Keycloaku si bere z backendu (`GET /api/v1/auth/config`). Tokeny drží jen v `sessionStorage`
+  panelu prohlížeče a před vypršením je obnovuje refresh tokenem.
+- Backend ověří podpis tokenu proti klíčům realmu (cache, při neznámém klíči je načte znovu – rotace),
+  vydavatele, platnost, typ `Bearer` a klienta (`azp`, nebo `audience`, je-li nastavená).
+- Roli určí ze skupin/rolí v tokenu: `operatorRoles` → operator, `viewerRoles` → jen čtení.
+  Skupina může přijít s plnou cestou (`/it/cmu-operators`) – hodnota bez lomítka porovnává jen
+  poslední část cesty, s lomítkem celou cestu. Přihlášený uživatel bez skupiny CMU uvidí vysvětlení
+  a své skupiny (ne další výzvu k přihlášení).
+- Statické tokeny (`viewerTokens`, `operatorTokens`) zůstávají pro stroje – Prometheus service
+  discovery, skripty. V GUI jsou schované pod „Přihlásit API tokenem“.
+- Akce, vytváření řetězců a změny pohledů se zapisují se jménem uživatele do `dataDir/audit.log`
+  (JSON na řádek); uložené pohledy mají autora (`createdBy`).
+
+### Nastavení Keycloaku
+
+1. **Realm** – např. `cmu` (nebo stávající firemní realm).
+2. **User federation → LDAP** – připojení k LDAPu/AD (Connection URL `ldaps://…`, Bind DN, Users DN),
+   *Edit mode* `READ_ONLY`.
+3. **Mapper skupin** v LDAP provideru → *Add mapper* typu `group-ldap-mapper`:
+   *LDAP Groups DN* (např. `ou=groups,dc=firma,dc=cz`), *Group Name LDAP Attribute* `cn`,
+   *Group Object Classes* `groupOfNames` (AD: `group`), *Membership LDAP Attribute* `member`,
+   *Mode* `READ_ONLY`; pak *Sync LDAP groups to Keycloak*.
+   (Alternativa: `role-ldap-mapper` → realm role; CMU čte i `realm_access.roles`.)
+4. **Skupiny v LDAPu** – `cmu-operators` a `cmu-viewers`, nebo vlastní názvy do `operatorRoles` / `viewerRoles`.
+5. **Klient `cmu`** – OpenID Connect, *Client authentication* vypnuto (veřejný), *Standard flow* zapnuto,
+   *Direct access grants* vypnuto; *Valid redirect URIs* a *Valid post logout redirect URIs*
+   `https://cmu.firma.cz/*`, *Web origins* `https://cmu.firma.cz`; v *Advanced* → *Proof Key for Code
+   Exchange Code Challenge Method* `S256`.
+6. **Skupiny do tokenu** – *Clients → cmu → Client scopes → cmu-dedicated → Add mapper → By configuration
+   → Group Membership*: *Token Claim Name* `groups`, *Add to access token* zapnuto (*Full group path*
+   může být zapnuté i vypnuté).
+7. **Backend** – sekce `auth.oidc` v `backend/config/cmu.example.yaml`. `issuer` musí přesně odpovídat
+   adrese Keycloaku, jak ji vidí prohlížeč (claim `iss`); když backend dosáhne Keycloaku jinou cestou,
+   nastavte `discoveryUrl`.
+
+Ověření: přihlaste se do GUI a v pravém horním rohu je jméno a role; najetím myší se ukážou skupiny,
+které přišly v tokenu. Totéž vrací `GET /api/v1/me`.
 
 ## 11. Integrace
 
@@ -474,6 +522,5 @@ zastavení, smazání, výpadek agenta).
 - Zdroj pravdy pro konfiguraci (databáze backendu, nebo Git repozitář s review) zatím není rozhodnutý.
 - Backend běží v jedné instanci; pohledy a historie jsou v JSON souborech v `dataDir`, aktuální stav
   a lokální operace v paměti. Pro vysokou dostupnost by vše muselo jít do sdílené databáze (PostgreSQL).
-- Uložené pohledy jsou sdílené pro celý tým – osobní pohledy půjdou až s přihlašováním uživatelů.
-- Přihlášení do GUI je zatím API token; napojení na firemní přihlášení (OIDC/LDAP) je další krok.
+- Uložené pohledy jsou sdílené pro celý tým (s autorem); osobní pohledy zatím nejsou.
 - `frontend/package-lock.json` zatím není v repozitáři (vznikne při prvním `npm install`) – commitněte ho.

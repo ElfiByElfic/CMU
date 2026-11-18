@@ -13,6 +13,8 @@ import type {
   Target,
 } from "./types";
 
+import { accessToken, dropSession } from "../auth/oidc";
+
 const BASE = "/api/v1";
 const TOKEN_KEY = "cmu.token";
 
@@ -55,7 +57,9 @@ export function setToken(token: string): void {
 let memoryToken = "";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = getToken() || memoryToken;
+  // přihlášení přes Keycloak má přednost; statický API token je pro stroje a nouzový přístup
+  const oidc = await accessToken();
+  const token = oidc || getToken() || memoryToken;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -65,7 +69,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     throw new ApiError(0, "Backend je nedostupný");
   }
-  if (res.status === 401) authListeners.forEach((fn) => fn());
+  if (res.status === 401) {
+    if (oidc) dropSession(); // Keycloak relace už neplatí (odhlášení jinde, vypršela, změna klíčů)
+    authListeners.forEach((fn) => fn());
+  }
   const text = await res.text();
   let data: unknown = null;
   if (text) {

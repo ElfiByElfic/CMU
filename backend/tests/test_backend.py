@@ -132,7 +132,8 @@ class BackendTest(unittest.TestCase):
             self.assertEqual(r.headers["content-type"], "application/problem+json")
             c.headers["Authorization"] = "Bearer view"
             self.assertEqual(c.get(f"{API}/chains").status_code, 200)
-            self.assertEqual(c.get(f"{API}/me").json(), {"role": "viewer", "authEnabled": True})
+            me = c.get(f"{API}/me").json()
+            self.assertEqual((me["role"], me["authEnabled"], me["via"], me["user"]), ("viewer", True, "token", None))
             self.assertEqual(c.post(f"{API}/chains/agents:vm-1:chain-a/actions/stop").status_code, 403)
 
     # ------------------------------------------------------------------ akce: agent

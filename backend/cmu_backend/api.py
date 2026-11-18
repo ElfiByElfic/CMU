@@ -6,12 +6,11 @@ Role: viewer (čtení) a operator (akce, vytváření). Bez nastavených tokenů
 
 from __future__ import annotations
 
+import json
 import logging
-import secrets
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from enum import IntEnum
 from typing import Any
 
 import httpx
@@ -23,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
+from .auth import Authenticator, Principal, Role
 from .core import Core
 from .integrations import PrometheusIntegration, sd_targets
 from .model import (
@@ -62,12 +62,6 @@ def app_version(a: ChainApp) -> str:
     return last.split(":", 1)[1] if ":" in last else "latest"
 
 
-class Role(IntEnum):
-    none = 0
-    viewer = 1
-    operator = 2
-
-
 class ApiError(Exception):
     def __init__(self, status: int, title: str, detail: str | None = None, errors: list[str] | None = None):
         super().__init__(title)
@@ -92,6 +86,7 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
         log.info("CMU backend %s: %d zdrojů, %d integrací", __version__, len(core.sources), len(core.integrations))
         yield
         await core.stop()
+        await authn.close()
 
     app = FastAPI(title="CMU – centrální backend", version=__version__, lifespan=lifespan,
                   description="Jednotný pohled na řetězce aplikací (agenti na VM, Komodo) "
@@ -121,26 +116,42 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
 
     # ------------------------------------------------------------------ autorizace
     auth = settings.auth
+    authn = Authenticator(auth, (transports or {}).get("oidc"))
+    app.state.authn = authn
+    audit_file = settings.dataDir / "audit.log" if settings.dataDir else None
 
-    def role_of(request: Request) -> Role:
-        if not auth.enabled:
-            return Role.operator
-        header = request.headers.get("authorization", "")
-        token = header[7:] if header.startswith("Bearer ") else ""
-        if token and any(secrets.compare_digest(token, t) for t in auth.operatorTokens):
-            return Role.operator
-        if token and any(secrets.compare_digest(token, t) for t in auth.viewerTokens):
-            return Role.viewer
-        return Role.none
+    async def principal_of(request: Request) -> Principal:
+        p = getattr(request.state, "principal", None)
+        if p is None:
+            p = await authn.principal(request.headers.get("authorization"))
+            request.state.principal = p
+        return p
 
-    def require(needed: Role) -> Callable[[Request], Role]:
-        def dep(request: Request) -> Role:
-            r = role_of(request)
-            if r < needed:
-                raise ApiError(401 if r == Role.none else 403,
-                               "Nepřihlášen" if r == Role.none else "Nedostatečné oprávnění")
-            return r
+    def require(needed: Role) -> Callable[[Request], Awaitable[Principal]]:
+        async def dep(request: Request) -> Principal:
+            p = await principal_of(request)
+            if p.role < needed:
+                if p.role == Role.none and not p.user:
+                    raise ApiError(401, "Nepřihlášen", p.error)
+                raise ApiError(403, "Nedostatečné oprávnění", p.error)
+            return p
         return dep
+
+    def audit(request: Request, action: str, target: str, **extra: Any) -> None:
+        """Kdo co udělal – dataDir/audit.log (JSON na řádek) a log backendu."""
+        p: Principal | None = getattr(request.state, "principal", None)
+        who = p.user if p and p.user else (f"token:{p.via}" if p else "?")
+        entry = {"at": utcnow().isoformat(), "user": who, "role": p.role.name if p else None,
+                 "via": p.via if p else None, "action": action, "target": target, **extra}
+        log.info("audit: %s %s %s", who, action, target)
+        if audit_file is None:
+            return
+        try:
+            audit_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            log.error("audit: %s", e)
 
     viewer = Depends(require(Role.viewer))
     operator = Depends(require(Role.operator))
@@ -170,8 +181,14 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
 
     @app.get(f"{P}/me", tags=["system"])
     async def me(request: Request) -> dict[str, Any]:
-        r = role_of(request)
-        return {"role": r.name, "authEnabled": auth.enabled}
+        p = await principal_of(request)
+        return {"role": p.role.name, "authEnabled": auth.enabled, "user": p.user, "via": p.via,
+                "groups": list(p.groups), "error": p.error}
+
+    @app.get(f"{P}/auth/config", tags=["system"])
+    async def auth_config() -> dict[str, Any]:
+        """Veřejné nastavení přihlášení pro frontend (adresa Keycloaku, klient)."""
+        return await authn.public_config()
 
     @app.get(f"{P}/summary", tags=["chains"], dependencies=[viewer])
     async def summary() -> Summary:
@@ -250,25 +267,31 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
 
     @app.post(f"{P}/chains/{{chain_id}}/actions/{{action}}", tags=["chains"], status_code=202,
               dependencies=[operator])
-    async def chain_action(chain_id: str, action: str) -> Operation:
+    async def chain_action(chain_id: str, action: str, request: Request) -> Operation:
         ch = get_chain(chain_id)
         need(ch, action)
-        return await source_of(ch).chain_action(ch, action)
+        op = await source_of(ch).chain_action(ch, action)
+        audit(request, f"chain.{action}", chain_id, operation=op.id)
+        return op
 
     @app.delete(f"{P}/chains/{{chain_id}}", tags=["chains"], status_code=202, dependencies=[operator])
-    async def delete_chain(chain_id: str) -> Operation:
+    async def delete_chain(chain_id: str, request: Request) -> Operation:
         ch = get_chain(chain_id)
         need(ch, "delete")
-        return await source_of(ch).delete_chain(ch)
+        op = await source_of(ch).delete_chain(ch)
+        audit(request, "chain.delete", chain_id, operation=op.id)
+        return op
 
     @app.post(f"{P}/chains/{{chain_id}}/apps/{{app_id}}/actions/{{action}}", tags=["chains"], status_code=202,
               dependencies=[operator])
-    async def app_action(chain_id: str, app_id: str, action: str) -> Operation:
+    async def app_action(chain_id: str, app_id: str, action: str, request: Request) -> Operation:
         ch = get_chain(chain_id)
         need(ch, f"app:{action}")
         if not any(a.id == app_id for a in ch.apps):
             raise ApiError(404, "Aplikace nenalezena", app_id)
-        return await source_of(ch).app_action(ch, app_id, action)
+        op = await source_of(ch).app_action(ch, app_id, action)
+        audit(request, f"app.{action}", f"{chain_id}/{app_id}", operation=op.id)
+        return op
 
     @app.get(f"{P}/chains/{{chain_id}}/apps/{{app_id}}/logs", tags=["chains"], dependencies=[viewer])
     async def app_logs(chain_id: str, app_id: str, tail: int = Query(100, ge=1, le=5000)) -> dict[str, list[str]]:
@@ -290,26 +313,31 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
         return core.views.list()
 
     @app.post(f"{P}/views", tags=["views"], status_code=201, dependencies=[operator])
-    async def create_view(data: SavedViewIn) -> SavedView:
+    async def create_view(data: SavedViewIn, request: Request) -> SavedView:
+        p = await principal_of(request)
         try:
-            return core.views.create(data)
+            v = core.views.create(data, created_by=p.user)
         except ViewConflict as e:
             raise ApiError(409, "Pohled nelze uložit", str(e)) from e
+        audit(request, "view.create", v.id, name=v.name)
+        return v
 
     @app.put(f"{P}/views/{{view_id}}", tags=["views"], dependencies=[operator])
-    async def update_view(view_id: str, data: SavedViewIn) -> SavedView:
+    async def update_view(view_id: str, data: SavedViewIn, request: Request) -> SavedView:
         try:
             v = core.views.update(view_id, data)
         except ViewConflict as e:
             raise ApiError(409, "Pohled nelze uložit", str(e)) from e
         if v is None:
             raise ApiError(404, "Pohled nenalezen", view_id)
+        audit(request, "view.update", view_id, name=v.name)
         return v
 
     @app.delete(f"{P}/views/{{view_id}}", tags=["views"], status_code=204, dependencies=[operator])
-    async def delete_view(view_id: str) -> Response:
+    async def delete_view(view_id: str, request: Request) -> Response:
         if not core.views.delete(view_id):
             raise ApiError(404, "Pohled nenalezen", view_id)
+        audit(request, "view.delete", view_id)
         return Response(status_code=204)
 
     @app.get(f"{P}/operations/{{op_id}}", tags=["chains"], dependencies=[viewer])
@@ -358,8 +386,11 @@ def create_app(settings: Settings, transports: dict[str, httpx.AsyncBaseTranspor
         return await source_for_create(req).validate_chain(req)
 
     @app.post(f"{P}/chains", tags=["create"], status_code=202, dependencies=[operator])
-    async def create_chain(req: ChainCreate) -> Operation:
-        return await source_for_create(req).create_chain(req)
+    async def create_chain(req: ChainCreate, request: Request) -> Operation:
+        op = await source_for_create(req).create_chain(req)
+        audit(request, "chain.create", f"{req.sourceId}:{req.location}", name=req.name, kind=req.kind.value,
+              operation=op.id)
+        return op
 
     # ------------------------------------------------------------------ integrace
     @app.get(f"{P}/integrations/prometheus/targets", tags=["integrations"], dependencies=[viewer])
