@@ -333,7 +333,7 @@ Všechny volby jsou popsané v `backend/config/cmu.example.yaml`. Tokeny se do s
 
 | Endpoint | Účel |
 |---|---|
-| `GET /chains?health=&kind=&location=&environment=&q=` | Dlaždice – řetězce se stavem, lokalitou, výstrahami a metrikami |
+| `GET /chains?health=&host=&name=&version=&kind=&environment=&q=` | Dlaždice – řetězce se stavem, hostitelem, výstrahami a metrikami; parametry lze opakovat |
 | `GET /chains/{id}` | Detail řetězce (`id` = `<zdroj>:<lokalita>:<řetězec>`) |
 | `POST /chains/{id}/actions/{start\|stop\|restart}`, `DELETE /chains/{id}` | Akce nad řetězcem (operator) |
 | `POST /chains/{id}/apps/{app}/actions/{akce}`, `GET …/logs` | Akce a logy jedné aplikace/kontejneru |
@@ -424,10 +424,24 @@ zastavení, smazání, výpadek agenta).
 - `npm run dev` – vývoj s proxy na backend (`CMU_BACKEND=http://…` pro jiný backend),
   `npm run build` – typová kontrola + `dist/`.
 - Typy API jsou v `src/api/types.ts` a odpovídají `backend/cmu_backend/model.py`.
-- Stránky: **Řetězce** (dlaždice, filtry stav/typ/lokalita/prostředí, hledání, řazení – filtry jsou
-  v URL, dají se sdílet), **detail řetězce** (aplikace v pořadí toku, akce, logy, umístění, výstrahy,
-  metriky), **Nový řetězec** (procesy z katalogu VM, nebo kontejnery pro Komodo s náhledem compose),
-  **Zdroje a integrace** (stav zdrojů, integrací a dostupnost lokalit).
+- Stránky: **Řetězce** (dlaždice s filtry, viz níže), **detail řetězce** (aplikace v pořadí toku, akce,
+  logy, umístění, výstrahy, metriky), **Nový řetězec** (procesy z katalogu VM, nebo kontejnery pro Komodo
+  s náhledem compose), **Zdroje a integrace** (stav zdrojů, integrací a dostupnost hostitelů).
+- **Filtry dashboardu** – mezi filtry platí A ZÁROVEŇ, mezi hodnotami jednoho filtru NEBO.
+  Každá nabídka má hledání a u hodnot počet řetězců, které by s ostatními filtry zbyly:
+
+  | Filtr | Hodnoty |
+  |---|---|
+  | Stav | rychle *S problémem* / *Bez problému*, nebo jednotlivé stavy (Problém, Varování, …) |
+  | Hostitel | VM s agentem a Docker servery v Komodu (s IP a prostředím) |
+  | Řetězec | název řetězce – stejný řetězec na více hostitelích |
+  | Verze | verze aplikace (u kontejnerů tag image), seskupené podle aplikace |
+  | Typ, Prostředí | procesy / kontejnery; production, test, … |
+  | Další | má výstrahu, rozdílné verze (stejný řetězec má jinde jinou verzi), předběžná verze, čeká na restart, restartovala se, nedostupný hostitel, probíhá operace – kombinují se A ZÁROVEŇ |
+
+  Hledání prochází názvy, hostitele, adresy, aplikace, image i texty výstrah. Filtry jsou v URL
+  (`#/?host=vm-1&host=vm-2&version=App2@2.4.0`), takže se dají poslat odkazem. Stejné filtry umí
+  i API: `GET /api/v1/chains?host=…&name=…&version=…&health=…`.
 - E2E testy: `npm run build && pytest frontend/e2e` (potřebují nainstalovaný backend a Playwright;
   test si sám spustí backend v demo režimu).
 
