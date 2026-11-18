@@ -1,10 +1,34 @@
 // Filtry dashboardu. Mezi různými filtry platí A ZÁROVEŇ, mezi hodnotami jednoho filtru NEBO.
 // Stav filtrů žije v URL (?host=a&host=b&version=App2@2.4.0…), takže se dá sdílet odkazem.
 
-import type { Chain, ChainApp, Health } from "../api/types";
+import type { Chain, ChainApp, Health, Severity } from "../api/types";
 
-export type Dim = "health" | "host" | "chain" | "version" | "kind" | "env" | "flag";
-export const DIMS: Dim[] = ["health", "host", "chain", "version", "kind", "env", "flag"];
+export type Dim = "health" | "host" | "chain" | "version" | "severity" | "kind" | "env" | "flag";
+export const DIMS: Dim[] = ["health", "host", "chain", "version", "severity", "kind", "env", "flag"];
+
+/** Závažnost výstrahy; „none“ = řetězec bez výstrahy. */
+export const SEVERITY_ORDER: (Severity | "none")[] = ["disaster", "high", "average", "warning", "info", "none"];
+
+// Časové filtry (jedna hodnota): poslední změna a stáří dat.
+export const CHANGED: Record<string, { label: string; ms: number; within: boolean }> = {
+  "15m": { label: "za posledních 15 min", ms: 15 * 60e3, within: true },
+  "1h": { label: "za poslední hodinu", ms: 3600e3, within: true },
+  "24h": { label: "za posledních 24 h", ms: 86400e3, within: true },
+  "7d": { label: "za posledních 7 dní", ms: 7 * 86400e3, within: true },
+  "!7d": { label: "beze změny déle než 7 dní", ms: 7 * 86400e3, within: false },
+  "!30d": { label: "beze změny déle než 30 dní", ms: 30 * 86400e3, within: false },
+};
+export const AGE: Record<string, { label: string; ms: number }> = {
+  fresh: { label: "jen aktuální", ms: 0 },
+  "1m": { label: "starší než 1 min", ms: 60e3 },
+  "15m": { label: "starší než 15 min", ms: 15 * 60e3 },
+  "1h": { label: "starší než 1 h", ms: 3600e3 },
+};
+
+export type GroupBy = "" | "host" | "chain" | "env" | "health" | "kind";
+export const GROUPS: Record<Exclude<GroupBy, "">, string> = {
+  host: "hostitele", chain: "řetězce", env: "prostředí", health: "stavu", kind: "typu",
+};
 
 export type Flag = "alerts" | "stale" | "pending" | "prerelease" | "drift" | "restarts" | "busy";
 
@@ -21,20 +45,39 @@ export const FLAGS: Record<Flag, { label: string; hint: string }> = {
 export const PROBLEM: Health[] = ["problem", "warning", "unknown"];
 export const NO_PROBLEM: Health[] = ["ok", "stopped"];
 
-export type Filters = Record<Dim, string[]> & { q: string };
+export type Filters = Record<Dim, string[]> & { q: string; changed: string; age: string; now: number };
 
-export function readFilters(params: URLSearchParams): Filters {
-  const f = { q: params.get("q") ?? "" } as Filters;
+export function readFilters(params: URLSearchParams, now: number): Filters {
+  const one = (k: string, allowed: Record<string, unknown>) => {
+    const v = params.get(k) ?? "";
+    return v in allowed ? v : "";
+  };
+  const f = { q: params.get("q") ?? "", changed: one("changed", CHANGED), age: one("age", AGE), now } as Filters;
   DIMS.forEach((d) => {
     // kompatibilita se staršími odkazy: ?location=… a ?health=a,b
     const raw = d === "host" ? [...params.getAll("host"), ...params.getAll("location")] : params.getAll(d);
-    f[d] = [...new Set(raw.flatMap((v) => (d === "health" ? v.split(",") : [v])).filter(Boolean))];
+    f[d] = [...new Set(raw.flatMap((v) => (d === "health" || d === "severity" ? v.split(",") : [v])).filter(Boolean))];
   });
   return f;
 }
 
 export function isFiltered(f: Filters): boolean {
-  return Boolean(f.q.trim()) || DIMS.some((d) => f[d].length > 0);
+  return Boolean(f.q.trim() || f.changed || f.age) || DIMS.some((d) => f[d].length > 0);
+}
+
+/** Parametry pohledu ve stálém pořadí – podle nich se pozná, který uložený pohled je otevřený. */
+export function normalizeQuery(params: URLSearchParams | string): string {
+  const p = typeof params === "string" ? new URLSearchParams(params.replace(/^\?/, "")) : params;
+  const pairs: [string, string][] = [];
+  p.forEach((v, k) => v && pairs.push([k, v]));
+  pairs.sort(([ak, av], [bk, bv]) => (ak < bk ? -1 : ak > bk ? 1 : av < bv ? -1 : av > bv ? 1 : 0));
+  return new URLSearchParams(pairs).toString();
+}
+
+/** Čas poslední změny, nebo (když změna nebyla) začátek sledování. */
+export function lastChangeOrObserved(c: Chain): number | null {
+  const t = c.lastChangeAt ?? c.observedSince;
+  return t ? Date.parse(t) : null;
 }
 
 /** Verze aplikace: u procesů z agenta `version`, u kontejnerů tag image. */
@@ -93,6 +136,7 @@ export class Index {
       case "host": return [c.location.name];
       case "chain": return [c.name];
       case "version": return c.apps.map(versionKey);
+      case "severity": return c.alerts.length ? c.alerts.map((a) => a.severity) : ["none"];
       case "kind": return [c.kind];
       case "env": return c.location.environment ? [c.location.environment] : [];
       case "flag": return [...this.flags(c)];
@@ -106,6 +150,19 @@ export class Index {
       // příznaky se kombinují A ZÁROVEŇ (má výstrahu a zároveň rozdílné verze), ostatní NEBO
       const ok = d === "flag" ? f[d].every((x) => vals.includes(x)) : f[d].some((x) => vals.includes(x));
       if (!ok) return false;
+    }
+    if (f.changed) {
+      const def = CHANGED[f.changed];
+      if (def.within) {
+        if (!c.lastChangeAt || f.now - Date.parse(c.lastChangeAt) > def.ms) return false;
+      } else {
+        const ref = lastChangeOrObserved(c);
+        if (ref === null || f.now - ref < def.ms) return false;
+      }
+    }
+    if (f.age) {
+      const seen = c.lastSeen ? Date.parse(c.lastSeen) : null;
+      if (f.age === "fresh" ? c.stale : seen === null || f.now - seen <= AGE[f.age].ms) return false;
     }
     const needle = f.q.trim().toLowerCase();
     return !needle || haystack(c).includes(needle);

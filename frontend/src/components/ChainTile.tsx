@@ -1,5 +1,5 @@
 import type { Chain } from "../api/types";
-import { CHAIN_STATE, HEALTH, KIND, ago, num } from "../lib/format";
+import { CHAIN_STATE, HEALTH, KIND, ago, duration, num } from "../lib/format";
 import { Badge, HealthPill, Icon, MiniFlow } from "./ui";
 
 /** Jedna dlaždice = jeden řetězec. Lokalita je součástí dlaždice, ne nadřazená skupina. */
@@ -27,7 +27,14 @@ export function ChainTile({ chain, now }: { chain: Chain; now: number }) {
       <div className="tile-meta">
         <Badge>{KIND[chain.kind]}</Badge>
         {loc.environment && <Badge>{loc.environment}</Badge>}
-        <span className="muted">{chain.stale ? "data nejsou aktuální" : CHAIN_STATE[chain.state]}</span>
+        <span className="muted">
+          {chain.stale ? "data nejsou aktuální" : CHAIN_STATE[chain.state]}
+          {chain.stateSince && (
+            <span title={chain.stateSinceExact ? `od ${new Date(chain.stateSince).toLocaleString("cs-CZ")}` : "změnu stavu CMU nevidělo – trvá nejméně tak dlouho"}>
+              {" · "}{chain.stateSinceExact ? "" : "≥ "}{duration(now - Date.parse(chain.stateSince))}
+            </span>
+          )}
+        </span>
       </div>
 
       {worstAlert && (
