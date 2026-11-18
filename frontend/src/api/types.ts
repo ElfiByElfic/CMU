@@ -193,4 +193,9 @@ export interface ChainValidation {
 export interface Me {
   role: "none" | "viewer" | "operator";
   authEnabled: boolean;
+  /** Uživatel z Keycloaku; null u statického tokenu. */
+  user: string | null;
+  via: "none" | "token" | "oidc" | "open";
+  groups: string[];
+  error: string | null;
 }

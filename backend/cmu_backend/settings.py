@@ -31,15 +31,37 @@ def expand_env(value: Any) -> Any:
     return value
 
 
+class OidcSettings(BaseModel):
+    """Přihlášení přes Keycloak (OpenID Connect). Role se berou z claimů tokenu – typicky ze skupin
+    namapovaných z LDAPu (group-ldap-mapper + mapper „Group Membership“ do claimu `groups`)."""
+
+    issuer: str = Field(description="URL realmu, např. https://keycloak.example/realms/cmu (= claim iss)")
+    clientId: str = Field(default="cmu", description="Veřejný klient frontendu (Standard flow, PKCE S256)")
+    discoveryUrl: str | None = Field(
+        default=None, description="Jiná adresa pro backend (vnitřní síť); výchozí issuer + /.well-known/…")
+    audience: str | None = Field(default=None, description="Pokud je nastavené, musí být v claimu aud")
+    roleClaims: list[str] = Field(
+        default=["groups", "realm_access.roles", "resource_access.{clientId}.roles"],
+        description="Odkud brát role/skupiny; tečka = vnořený claim")
+    operatorRoles: list[str] = Field(default=["cmu-operators"], description="Skupiny/role pro roli operator")
+    viewerRoles: list[str] = Field(default=["cmu-viewers"], description="Skupiny/role pro roli viewer")
+    usernameClaim: str = "preferred_username"
+    scopes: str = "openid profile"
+    leewayS: int = Field(default=30, ge=0, description="Tolerance rozdílu hodin")
+    verifyTls: bool = True
+
+
 class AuthSettings(BaseModel):
-    """Prázdné seznamy = bez přihlášení (jen pro vývoj)."""
+    """Bez tokenů a bez oidc = bez přihlášení (jen pro vývoj).
+    Statické tokeny zůstávají pro stroje (Prometheus service discovery, skripty)."""
 
     viewerTokens: list[str] = []
     operatorTokens: list[str] = []
+    oidc: OidcSettings | None = None
 
     @property
     def enabled(self) -> bool:
-        return bool(self.viewerTokens or self.operatorTokens)
+        return bool(self.viewerTokens or self.operatorTokens or self.oidc)
 
 
 class AgentEntry(BaseModel):

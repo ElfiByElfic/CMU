@@ -40,10 +40,10 @@ class ViewStore:
             raise ViewConflict(f"pohled „{name}“ už existuje")
         return name
 
-    def create(self, data: SavedViewIn) -> SavedView:
+    def create(self, data: SavedViewIn, created_by: str | None = None) -> SavedView:
         now = utcnow()
         v = SavedView(id=uuid.uuid4().hex[:10], name=self._check_name(data.name),
-                      query=normalize_query(data.query), createdAt=now, updatedAt=now)
+                      query=normalize_query(data.query), createdAt=now, updatedAt=now, createdBy=created_by)
         self._views[v.id] = v
         self._save()
         return v

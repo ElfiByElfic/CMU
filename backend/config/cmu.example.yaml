@@ -10,9 +10,19 @@ dataDir: /var/lib/cmu               # uložené pohledy a historie změn (bez n�
 historyEventsPerChain: 100          # kolik posledních událostí držet u každého řetězce
 historyRetentionDays: 30            # historie řetězců, které zmizely, se po této době zapomene
 
-auth:                     # prázdné seznamy = bez přihlášení (jen pro vývoj)
+auth:
+  # Lidé: přihlášení přes Keycloak, role podle skupin z LDAPu (README, kap. Přihlášení přes Keycloak)
+  oidc:
+    issuer: https://keycloak.example.local/realms/cmu   # musí přesně odpovídat claimu iss v tokenech
+    clientId: cmu                                       # veřejný klient frontendu (PKCE S256)
+    # discoveryUrl: http://keycloak.internal:8080/realms/cmu/.well-known/openid-configuration
+    operatorRoles: [cmu-operators]   # LDAP skupina (nebo role) → operator
+    viewerRoles: [cmu-viewers]       # LDAP skupina (nebo role) → jen čtení
+    # roleClaims: [groups, realm_access.roles, "resource_access.{clientId}.roles"]
+  # Stroje: statické tokeny (Prometheus service discovery, skripty). Lze vynechat.
   viewerTokens: ["${CMU_VIEWER_TOKEN}"]
-  operatorTokens: ["${CMU_OPERATOR_TOKEN}"]
+  operatorTokens: []
+  # bez oidc a bez tokenů = bez přihlášení (jen pro vývoj)
 
 sources:
   # Řetězce procesů: chain-agent na každé VM

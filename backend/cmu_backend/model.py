@@ -251,6 +251,7 @@ class SavedView(BaseModel):
     query: str = Field(max_length=2000, description="Parametry dashboardu, např. host=vm-1&health=problem")
     createdAt: datetime
     updatedAt: datetime
+    createdBy: str | None = Field(default=None, description="Uživatel z Keycloaku, který pohled vytvořil")
 
 
 class SavedViewIn(BaseModel):
